@@ -61,7 +61,17 @@ input{width:100%;background:var(--panel);border:1px solid var(--line);border-rad
  let vehicles=[],filter='all',markers=new Map();
  const $=id=>document.getElementById(id);
  const val=(o,...keys)=>{for(const k of keys)if(o[k]!==undefined&&o[k]!==null&&o[k]!=='')return o[k];return null};
- function isTram(v){
+ function isTram(v) {
+  const line = String(v.routeShortName || "").trim();
+
+  // Linie tramwajowe w Gdańsku
+  const tramLines = [
+    "2", "3", "4", "5", "6",
+    "7", "8", "9", "10", "11", "12"
+  ];
+
+  return tramLines.includes(line);
+ }
    const explicit=String(val(v,'vehicleType','type','routeType','category')||'').toLowerCase();
    if(explicit.includes('tram'))return true;
    if(explicit.includes('bus'))return false;
