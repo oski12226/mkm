@@ -4,9 +4,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#080f1c">
 <title>Gdańsk Transit</title>
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet"
+href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 
 <style>
 :root {
@@ -20,6 +22,7 @@
   --muted:#91a4bd;
   --green:#37d99a;
   --orange:#ffb454;
+  --red:#ff737d;
 }
 
 * {box-sizing:border-box}
@@ -33,9 +36,11 @@ body {
 
 button,input {font:inherit}
 
+button {cursor:pointer}
+
 .app {
   display:grid;
-  grid-template-columns:240px 1fr;
+  grid-template-columns:245px minmax(0,1fr);
   min-height:100vh;
 }
 
@@ -44,11 +49,11 @@ button,input {font:inherit}
 .sidebar {
   background:#091321;
   border-right:1px solid var(--border);
-  padding:23px 16px;
+  padding:24px 16px;
 }
 
 .logo {
-  font-size:20px;
+  font-size:19px;
   font-weight:900;
   margin-bottom:35px;
   letter-spacing:1px;
@@ -71,7 +76,7 @@ button,input {font:inherit}
   padding:13px;
   border-radius:10px;
   margin-bottom:5px;
-  cursor:pointer;
+  transition:.2s;
 }
 
 .nav button:hover,
@@ -80,10 +85,14 @@ button,input {font:inherit}
   color:white;
 }
 
+.nav button.active {
+  box-shadow:inset 3px 0 var(--blue);
+}
+
 /* MAIN */
 
 main {
-  padding:28px;
+  padding:27px;
   min-width:0;
 }
 
@@ -106,43 +115,57 @@ main {
   font-size:13px;
 }
 
+.header-right {
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
 .live {
   background:#102c2b;
   color:var(--green);
   border:1px solid #20594d;
-  padding:10px 14px;
+  padding:10px 13px;
   border-radius:30px;
   font-size:12px;
+  white-space:nowrap;
 }
+
+.refresh {
+  border:0;
+  background:var(--blue);
+  color:white;
+  padding:11px 15px;
+  border-radius:9px;
+  font-weight:bold;
+}
+
+.refresh:hover {background:#1474dc}
+
+/* STATS */
 
 .stats {
   display:grid;
-  grid-template-columns:repeat(4,1fr);
-  gap:15px;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:14px;
   margin-bottom:20px;
 }
 
 .stat {
   background:linear-gradient(140deg,#14263e,#0e1a2b);
   border:1px solid var(--border);
-  padding:19px;
+  padding:18px;
   border-radius:15px;
 }
 
-.stat small {
-  color:var(--muted);
-}
+.stat small {color:var(--muted)}
 
 .stat h2 {
   font-size:29px;
   margin:12px 0 0;
 }
 
-.content {
-  display:grid;
-  grid-template-columns:1.5fr 1fr;
-  gap:17px;
-}
+/* PANELS */
 
 .panel {
   background:var(--panel);
@@ -158,6 +181,7 @@ main {
   display:flex;
   justify-content:space-between;
   align-items:center;
+  gap:10px;
 }
 
 .panel-header h3 {
@@ -165,15 +189,33 @@ main {
   font-size:16px;
 }
 
-.panel-header small {
-  color:var(--muted);
+.panel-header small {color:var(--muted)}
+
+.content {
+  display:grid;
+  grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr);
+  gap:17px;
 }
+
+/* MAP */
 
 #map {
   height:530px;
   width:100%;
   background:#122238;
 }
+
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background:#14243a;
+  color:white;
+}
+
+.leaflet-popup-content {line-height:1.7}
+
+/* VEHICLES */
+
+.list-wrapper {padding:13px}
 
 .search {
   width:100%;
@@ -186,9 +228,7 @@ main {
   margin-bottom:12px;
 }
 
-.list-wrapper {
-  padding:13px;
-}
+.search:focus {border-color:var(--blue)}
 
 .vehicles {
   max-height:465px;
@@ -206,9 +246,7 @@ main {
 }
 
 .vehicle:hover,
-.vehicle.selected {
-  background:#1a304b;
-}
+.vehicle.selected {background:#1a304b}
 
 .line {
   background:#164b7d;
@@ -246,28 +284,36 @@ main {
 
 .delay.late {color:var(--orange)}
 
+.empty {
+  padding:25px;
+  text-align:center;
+  color:var(--muted);
+}
+
+/* DETAILS */
+
 .details {
-  margin-top:18px;
+  padding:17px;
   display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:15px;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
 }
 
 .detail {
   background:var(--panel2);
   border:1px solid var(--border);
   border-radius:12px;
-  padding:17px;
+  padding:16px;
+  min-width:0;
 }
 
-.detail small {
-  color:var(--muted);
-}
+.detail small {color:var(--muted)}
 
 .detail strong {
   display:block;
-  font-size:19px;
+  font-size:18px;
   margin-top:8px;
+  overflow-wrap:anywhere;
 }
 
 .bottom {
@@ -281,63 +327,71 @@ main {
   padding:17px;
   color:var(--muted);
   font-size:13px;
-  line-height:1.7;
+  line-height:1.8;
 }
 
-.refresh {
-  border:0;
-  background:var(--blue);
-  color:white;
-  padding:11px 15px;
-  border-radius:9px;
-  cursor:pointer;
-  font-weight:bold;
-}
+.status-ok {color:var(--green)}
+.status-error {color:var(--red)}
 
-.refresh:hover {background:#1474dc}
+/* PAGE VISIBILITY */
 
-.leaflet-popup-content-wrapper,
-.leaflet-popup-tip {
-  background:#14243a;
-  color:white;
-}
+.page {display:none}
+.page.active {display:block}
 
-.leaflet-popup-content {line-height:1.7}
-
-.empty {
-  padding:25px;
-  text-align:center;
-  color:var(--muted);
-}
+/* MOBILE */
 
 @media(max-width:1050px) {
-  .app {grid-template-columns:190px 1fr}
+  .app {grid-template-columns:195px minmax(0,1fr)}
   .content {grid-template-columns:1fr}
 }
 
 @media(max-width:700px) {
   .app {display:block}
+
   .sidebar {
     padding:13px;
     border-right:0;
     border-bottom:1px solid var(--border);
   }
+
   .logo {margin-bottom:12px}
   .nav-title {display:none}
-  .nav {display:flex;overflow:auto}
+
+  .nav {
+    display:flex;
+    overflow-x:auto;
+    gap:4px;
+  }
+
   .nav button {
     width:auto;
     white-space:nowrap;
-    margin:0 4px 0 0;
+    margin:0;
+    font-size:12px;
   }
+
   main {padding:16px 12px}
+
   .header {align-items:flex-start}
   .header h1 {font-size:23px}
-  .stats {grid-template-columns:1fr 1fr;gap:9px}
+
+  .header-right {
+    flex-direction:column;
+    align-items:flex-end;
+  }
+
+  .stats {
+    grid-template-columns:1fr 1fr;
+    gap:9px;
+  }
+
   .stat {padding:13px}
   .stat h2 {font-size:24px}
+
   #map {height:390px}
+
   .bottom {grid-template-columns:1fr}
+
   .details {gap:9px}
 }
 </style>
@@ -354,25 +408,41 @@ main {
 <div class="nav-title">MENU GŁÓWNE</div>
 
 <div class="nav">
-<button class="active" onclick="showPage('map')">🗺️ Mapa pojazdów</button>
-<button onclick="showPage('vehicles')">🚌 Wszystkie pojazdy</button>
-<button onclick="showPage('info')">ℹ️ Informacje</button>
-</div>
 
+<button class="active" data-page="map">
+🗺️ Mapa pojazdów
+</button>
+
+<button data-page="vehicles">
+🚌 Wszystkie pojazdy
+</button>
+
+<button data-page="info">
+ℹ️ Informacje
+</button>
+
+</div>
 </aside>
 
 <main>
 
-<div class="header">
+<header class="header">
+
 <div>
 <h1 id="pageTitle">Mapa pojazdów</h1>
 <div class="subtitle">Transport publiczny · Gdańsk</div>
 </div>
 
-<div>
+<div class="header-right">
 <div class="live" id="connection">● Łączenie...</div>
+<button class="refresh" id="refresh">↻ Odśwież</button>
 </div>
-</div>
+
+</header>
+
+<!-- WIDOK MAPY -->
+
+<section class="page active" id="page-map">
 
 <div class="stats">
 
@@ -404,7 +474,7 @@ main {
 
 <div class="panel-header">
 <h3>🗺️ Mapa na żywo</h3>
-<button class="refresh" onclick="loadData()">↻</button>
+<small id="mapCount">0 pojazdów</small>
 </div>
 
 <div id="map"></div>
@@ -424,7 +494,6 @@ main {
 class="search"
 id="search"
 placeholder="Szukaj linii, pojazdu..."
-oninput="renderVehicles()"
 >
 
 <div class="vehicles" id="vehicleList">
@@ -443,29 +512,130 @@ oninput="renderVehicles()"
 </div>
 
 <div id="details" class="info">
-Wybierz pojazd z listy lub mapy, aby zobaczyć szczegóły.
+Wybierz pojazd z listy lub mapy.
 </div>
 
 </section>
+
+</section>
+
+<!-- WIDOK WSZYSTKICH POJAZDÓW -->
+
+<section class="page" id="page-vehicles">
+
+<div class="stats">
+
+<div class="stat">
+<small>🚌 Wszystkie pojazdy</small>
+<h2 id="total2">—</h2>
+</div>
+
+<div class="stat">
+<small>🔀 Linie</small>
+<h2 id="routes2">—</h2>
+</div>
+
+<div class="stat">
+<small>⏱️ Opóźnione</small>
+<h2 id="late2">—</h2>
+</div>
+
+<div class="stat">
+<small>📡 Status API</small>
+<h2 id="apiShort">—</h2>
+</div>
+
+</div>
+
+<section class="panel">
+
+<div class="panel-header">
+<h3>🚌 Lista pojazdów</h3>
+<small id="count2">0 wyników</small>
+</div>
+
+<div class="list-wrapper">
+
+<input
+class="search"
+id="search2"
+placeholder="Wyszukaj linię, numer lub kierunek..."
+>
+
+<div class="vehicles" id="vehicleList2">
+<div class="empty">Pobieranie danych...</div>
+</div>
+
+</div>
+
+</section>
+
+</section>
+
+<!-- WIDOK INFORMACJI -->
+
+<section class="page" id="page-info">
+
+<div class="stats">
+
+<div class="stat">
+<small>📡 Połączenie API</small>
+<h2 id="infoConnection">—</h2>
+</div>
+
+<div class="stat">
+<small>🚌 Pojazdy</small>
+<h2 id="infoVehicles">—</h2>
+</div>
+
+<div class="stat">
+<small>🔀 Linie</small>
+<h2 id="infoRoutes">—</h2>
+</div>
+
+<div class="stat">
+<small>🔄 Odświeżanie</small>
+<h2>20 s</h2>
+</div>
+
+</div>
 
 <div class="bottom">
 
 <section class="panel">
-<div class="panel-header"><h3>⚙️ Status API</h3></div>
-<div class="info" id="apiStatus">Oczekiwanie na dane...</div>
+
+<div class="panel-header">
+<h3>⚙️ Status systemu</h3>
+</div>
+
+<div class="info" id="apiStatus">
+Oczekiwanie na dane...
+</div>
+
 </section>
 
 <section class="panel">
-<div class="panel-header"><h3>📡 Informacje</h3></div>
-<div class="info">
-Źródło danych: Twój Cloudflare Worker.<br>
-Odświeżanie: co 20 sekund.<br>
-Mapa: OpenStreetMap / Leaflet.<br>
-Pozycje pojazdów mają charakter orientacyjny.
+
+<div class="panel-header">
+<h3>📡 O projekcie</h3>
 </div>
+
+<div class="info">
+<b>Gdańsk Transit</b><br>
+Niezależny projekt prezentujący informacje o komunikacji miejskiej w Gdańsku.<br><br>
+
+Źródło danych: Cloudflare Worker.<br>
+Mapa: OpenStreetMap / Leaflet.<br>
+Aktualizacja danych: co 20 sekund.<br><br>
+
+Pozycje pojazdów i opóźnienia mają charakter orientacyjny.
+</div>
+
 </section>
 
 </div>
+
+</section>
 
 </main>
 </div>
@@ -474,26 +644,53 @@ Pozycje pojazdów mają charakter orientacyjny.
 
 <script>
 
+"use strict";
+
+/* KONFIGURACJA */
+
 const API_URL =
 "https://gdansk-transport-api.oskarflis106.workers.dev/";
 
-const map = L.map("map").setView([54.352,18.646],12);
+/* ELEMENTY */
 
-L.tileLayer(
-"https://{tile}.openstreetmap.org/{z}/{x}/{y}.png",
-{
-attribution:"© OpenStreetMap contributors",
-maxZoom:19,
-tileSize:256
-}
-).addTo(map);
+const $ = id => document.getElementById(id);
 
 let vehicles = [];
 let markers = {};
 let selectedVehicle = null;
+let map = null;
+let mapReady = false;
+
+/* MAPA */
+
+function initMap() {
+
+if (typeof L === "undefined") {
+$("connection").textContent = "● Błąd Leaflet";
+return;
+}
+
+map = L.map("map").setView([54.352,18.646],12);
+
+L.tileLayer(
+"https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+{
+attribution:"© OpenStreetMap contributors",
+subdomains:["a","b","c"],
+maxZoom:19
+}
+).addTo(map);
+
+mapReady = true;
+
+}
+
+/* POMOCNICZE */
 
 function getId(v) {
-return String(v.vehicleId ?? v.vehicleCode ?? v.id ?? "");
+return String(
+v.vehicleId ?? v.vehicleCode ?? v.id ?? ""
+);
 }
 
 function getPosition(v) {
@@ -516,8 +713,11 @@ Number.isFinite(lat) &&
 Number.isFinite(lon) &&
 Math.abs(lat)<=90 &&
 Math.abs(lon)<=180 &&
-lat!==0 && lon!==0
-) return [lat,lon];
+lat!==0 &&
+lon!==0
+) {
+return [lat,lon];
+}
 
 return null;
 }
@@ -535,6 +735,7 @@ if (Math.abs(d)<60) return "Na czas";
 const m = Math.round(Math.abs(d)/60);
 
 return d>0 ? "+"+m+" min" : m+" min wcześniej";
+
 }
 
 function formatTime(t) {
@@ -543,7 +744,7 @@ if (!t) return "—";
 
 const d = new Date(t);
 
-if (isNaN(d)) return t;
+if (isNaN(d.getTime())) return String(t);
 
 return d.toLocaleTimeString("pl-PL",{
 hour:"2-digit",
@@ -552,11 +753,15 @@ minute:"2-digit"
 
 }
 
+/* POBIERANIE DANYCH */
+
 async function loadData() {
 
-const connection = document.getElementById("connection");
+const connection = $("connection");
 
-connection.textContent="● Pobieranie...";
+connection.textContent = "● Pobieranie...";
+
+$("refresh").disabled = true;
 
 try {
 
@@ -576,10 +781,15 @@ throw new Error("Brak tablicy vehicles");
 
 vehicles = data.vehicles;
 
-connection.textContent="● Dane aktualne";
+connection.textContent = "● Dane aktualne";
 
-document.getElementById("apiStatus").innerHTML =
-"Połączono z API.<br>Ostatnia aktualizacja: "+
+$("apiShort").textContent = "OK";
+$("infoConnection").textContent = "OK";
+$("infoVehicles").textContent = vehicles.length;
+
+$("apiStatus").innerHTML =
+'<span class="status-ok">● Połączono z API</span><br>'+
+'Ostatnia aktualizacja: '+
 formatTime(data.lastUpdate);
 
 updateStats();
@@ -588,50 +798,73 @@ updateMap();
 
 } catch(error) {
 
-connection.textContent="● Błąd połączenia";
+connection.textContent = "● Błąd połączenia";
 
-document.getElementById("apiStatus").textContent =
-"Błąd API: "+error.message;
+$("apiShort").textContent = "Błąd";
+$("infoConnection").textContent = "Błąd";
 
-console.error(error);
+$("apiStatus").textContent =
+"Błąd pobierania danych: "+error.message;
+
+console.error("API error:",error);
+
+} finally {
+
+$("refresh").disabled = false;
 
 }
 
 }
+
+/* STATYSTYKI */
 
 function updateStats() {
 
-document.getElementById("total").textContent=vehicles.length;
+const routeCount = new Set(
+vehicles.map(v=>v.routeShortName).filter(Boolean)
+).size;
 
-document.getElementById("buses").textContent=vehicles.length;
+const lateCount = vehicles.filter(
+v=>getDelay(v)>180
+).length;
 
-document.getElementById("routes").textContent=
-new Set(vehicles.map(v=>v.routeShortName).filter(Boolean)).size;
+$("total").textContent = vehicles.length;
+$("buses").textContent = vehicles.length;
+$("routes").textContent = routeCount;
+$("late").textContent = lateCount;
 
-document.getElementById("late").textContent=
-vehicles.filter(v=>getDelay(v)>180).length;
+$("total2").textContent = vehicles.length;
+$("routes2").textContent = routeCount;
+$("late2").textContent = lateCount;
+
+$("infoVehicles").textContent = vehicles.length;
+$("infoRoutes").textContent = routeCount;
 
 }
 
+/* MARKERY */
+
 function updateMap() {
+
+if (!mapReady) return;
 
 const active = new Set();
 
 vehicles.forEach(v=>{
 
 const pos = getPosition(v);
-
-if (!pos) return;
-
 const id = getId(v);
 
-if (!id) return;
+if (!pos || !id) return;
 
 active.add(id);
 
 const icon = L.divIcon({
+
 className:"",
-html:`<div style="
+
+html:`
+<div style="
 background:#168cff;
 border:2px solid white;
 width:30px;
@@ -641,14 +874,21 @@ display:grid;
 place-items:center;
 box-shadow:0 3px 12px #0008;
 font-size:15px;
-">🚌</div>`,
+">
+🚌
+</div>
+`,
+
 iconSize:[30,30],
 iconAnchor:[15,15]
+
 });
 
 if (!markers[id]) {
 
-markers[id]=L.marker(pos,{icon}).addTo(map);
+markers[id] = L.marker(pos,{
+icon
+}).addTo(map);
 
 markers[id].on("click",()=>{
 selectVehicle(id);
@@ -660,30 +900,84 @@ markers[id].setLatLng(pos);
 
 }
 
-markers[id].bindPopup(
-`<b>Linia ${v.routeShortName ?? "?"}</b><br>
+markers[id].bindPopup(`
+<b>Linia ${v.routeShortName ?? "?"}</b><br>
 Kierunek: ${v.headsign ?? "Nieznany"}<br>
 Pojazd: ${v.vehicleCode ?? id}<br>
-Prędkość: ${v.speed ?? "—"} km/h`
-);
+Prędkość: ${v.speed ?? "—"} km/h
+`);
 
 });
 
 Object.keys(markers).forEach(id=>{
 
 if (!active.has(id)) {
+
 map.removeLayer(markers[id]);
 delete markers[id];
+
 }
 
 });
 
+$("mapCount").textContent =
+active.size+" pojazdów";
+
 }
 
-function renderVehicles() {
+/* LISTA POJAZDÓW */
 
-const query =
-document.getElementById("search").value.toLowerCase();
+function createVehicleElement(v) {
+
+const id = getId(v);
+
+const div = document.createElement("div");
+div.className = "vehicle";
+
+if (selectedVehicle === id) {
+div.classList.add("selected");
+}
+
+const line = document.createElement("div");
+line.className = "line";
+line.textContent = v.routeShortName ?? "—";
+
+const info = document.createElement("div");
+info.className = "vehicle-info";
+
+const title = document.createElement("strong");
+title.textContent = v.headsign ?? "Nieznany kierunek";
+
+const meta = document.createElement("small");
+
+meta.textContent =
+"Nr "+(v.vehicleCode ?? id)+
+" · "+(v.speed ?? "—")+" km/h";
+
+info.append(title,meta);
+
+const delay = document.createElement("div");
+delay.className = "delay";
+
+if (getDelay(v)>180) {
+delay.classList.add("late");
+}
+
+delay.textContent = delayLabel(v);
+
+div.append(line,info,delay);
+
+div.addEventListener("click",()=>{
+selectVehicle(id);
+});
+
+return div;
+
+}
+
+function renderList(inputId,listId,countId) {
+
+const query = $(inputId).value.toLowerCase();
 
 const filtered = vehicles.filter(v=>
 
@@ -693,88 +987,67 @@ v.headsign,
 v.vehicleCode,
 v.vehicleService,
 v.vehicleId
-].some(x=>String(x ?? "").toLowerCase().includes(query))
+].some(x=>
+String(x ?? "").toLowerCase().includes(query)
+)
 
 );
 
-document.getElementById("count").textContent=
+$(countId).textContent =
 filtered.length+" wyników";
 
-const list = document.getElementById("vehicleList");
+const list = $(listId);
+
+list.replaceChildren();
 
 if (!filtered.length) {
 
-list.innerHTML='<div class="empty">Brak pojazdów.</div>';
+const empty = document.createElement("div");
+empty.className = "empty";
+empty.textContent = "Brak pojazdów.";
+list.appendChild(empty);
 
 return;
 
 }
 
-list.innerHTML="";
-
 filtered.forEach(v=>{
-
-const id=getId(v);
-
-const div=document.createElement("div");
-
-div.className="vehicle";
-
-const line=document.createElement("div");
-line.className="line";
-line.textContent=v.routeShortName ?? "—";
-
-const info=document.createElement("div");
-info.className="vehicle-info";
-
-const title=document.createElement("strong");
-title.textContent=v.headsign ?? "Nieznany kierunek";
-
-const meta=document.createElement("small");
-meta.textContent=
-"Nr "+(v.vehicleCode ?? id)+
-" · "+(v.speed ?? "—")+" km/h";
-
-info.append(title,meta);
-
-const delay=document.createElement("div");
-delay.className="delay";
-if(getDelay(v)>180) delay.classList.add("late");
-delay.textContent=delayLabel(v);
-
-div.append(line,info,delay);
-
-div.onclick=()=>selectVehicle(id);
-
-if(selectedVehicle===id) div.classList.add("selected");
-
-list.appendChild(div);
-
+list.appendChild(createVehicleElement(v));
 });
 
 }
 
-function selectVehicle(id) {
+function renderVehicles() {
 
-const v=vehicles.find(x=>getId(x)===id);
-
-if (!v) return;
-
-selectedVehicle=id;
-
-const pos=getPosition(v);
-
-if(pos) {
-
-map.setView(pos,15);
-
-if(markers[id]) markers[id].openPopup();
+renderList("search","vehicleList","count");
+renderList("search2","vehicleList2","count2");
 
 }
 
-document.getElementById("details").innerHTML="";
+/* SZCZEGÓŁY */
 
-const fields=[
+function selectVehicle(id) {
+
+const v = vehicles.find(x=>getId(x)===id);
+
+if (!v) return;
+
+selectedVehicle = id;
+
+const pos = getPosition(v);
+
+if (pos && mapReady) {
+
+map.setView(pos,15);
+
+if (markers[id]) {
+markers[id].openPopup();
+}
+
+}
+
+const fields = [
+
 ["Linia",v.routeShortName],
 ["Kierunek",v.headsign],
 ["Numer pojazdu",v.vehicleCode ?? v.vehicleId],
@@ -783,79 +1056,105 @@ const fields=[
 ["Opóźnienie",delayLabel(v)],
 ["Rozpoczęcie kursu",formatTime(v.scheduledTripStartTime)],
 ["Ostatnia aktualizacja",formatTime(v.generated)]
+
 ];
 
-const container=document.createElement("div");
-container.className="details";
+const container = document.createElement("div");
+container.className = "details";
 
 fields.forEach(([name,value])=>{
 
-const box=document.createElement("div");
-box.className="detail";
+const box = document.createElement("div");
+box.className = "detail";
 
-const label=document.createElement("small");
-label.textContent=name;
+const label = document.createElement("small");
+label.textContent = name;
 
-const val=document.createElement("strong");
-val.textContent=value ?? "—";
+const val = document.createElement("strong");
+val.textContent = value ?? "—";
 
 box.append(label,val);
 container.appendChild(box);
 
 });
 
-document.getElementById("details").appendChild(container);
+$("details").replaceChildren(container);
 
 renderVehicles();
 
 }
 
+/* NAWIGACJA */
+
 function showPage(page) {
 
 const titles = {
-map: "Mapa pojazdów",
-vehicles: "Wszystkie pojazdy",
-info: "Informacje"
+map:"Mapa pojazdów",
+vehicles:"Wszystkie pojazdy",
+info:"Informacje"
 };
 
-document.getElementById("pageTitle").textContent = titles[page];
+if (!titles[page]) return;
 
-document.querySelectorAll(".nav button").forEach(button => {
-button.classList.toggle(
-"active",
-button.getAttribute("onclick") === `showPage('${page}')`
-);
+$("pageTitle").textContent = titles[page];
+
+document.querySelectorAll(".page").forEach(section=>{
+section.classList.remove("active");
 });
 
-const content = document.querySelector(".content");
-const stats = document.querySelector(".stats");
-const details = document.querySelectorAll("main > .panel");
+$("page-"+page).classList.add("active");
 
-if (page === "map") {
-content.style.display = "grid";
-stats.style.display = "grid";
-details.forEach(x => x.style.display = "");
+document.querySelectorAll(".nav button").forEach(button=>{
+
+button.classList.toggle(
+"active",
+button.dataset.page === page
+);
+
+});
+
+if (page === "map" && mapReady) {
+
+setTimeout(()=>{
 map.invalidateSize();
+},100);
+
 }
 
 if (page === "vehicles") {
-content.style.display = "grid";
-stats.style.display = "grid";
-details.forEach(x => x.style.display = "");
-document.querySelector(".content").scrollIntoView({
-behavior: "smooth"
+renderVehicles();
+}
+
+window.scrollTo({
+top:0,
+behavior:"smooth"
 });
+
 }
 
-if (page === "info") {
-content.style.display = "none";
-stats.style.display = "none";
+/* OBSŁUGA PRZYCISKÓW */
 
-details.forEach(x => x.style.display = "none");
+document.querySelectorAll(".nav button").forEach(button=>{
 
-document.getElementById("apiStatus").parentElement.style.display = "block";
-}
-}
+button.addEventListener("click",()=>{
+showPage(button.dataset.page);
+});
+
+});
+
+$("refresh").addEventListener("click",loadData);
+
+$("search").addEventListener("input",renderVehicles);
+
+$("search2").addEventListener("input",renderVehicles);
+
+/* START */
+
+initMap();
+
+loadData();
+
+setInterval(loadData,20000);
 
 </script>
 
