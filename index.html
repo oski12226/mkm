@@ -812,32 +812,50 @@ renderVehicles();
 
 function showPage(page) {
 
-const titles={
-map:"Mapa pojazdów",
-vehicles:"Wszystkie pojazdy",
-info:"Informacje"
+const titles = {
+map: "Mapa pojazdów",
+vehicles: "Wszystkie pojazdy",
+info: "Informacje"
 };
 
-document.getElementById("pageTitle").textContent=titles[page];
+document.getElementById("pageTitle").textContent = titles[page];
 
-if(page==="map") {
+document.querySelectorAll(".nav button").forEach(button => {
+button.classList.toggle(
+"active",
+button.getAttribute("onclick") === `showPage('${page}')`
+);
+});
 
+const content = document.querySelector(".content");
+const stats = document.querySelector(".stats");
+const details = document.querySelectorAll("main > .panel");
+
+if (page === "map") {
+content.style.display = "grid";
+stats.style.display = "grid";
+details.forEach(x => x.style.display = "");
 map.invalidateSize();
-
 }
 
-if(page==="info") {
-
-document.getElementById("details").textContent=
-"Gdańsk Transit korzysta z danych udostępnianych przez Twój Cloudflare Worker.";
-
+if (page === "vehicles") {
+content.style.display = "grid";
+stats.style.display = "grid";
+details.forEach(x => x.style.display = "");
+document.querySelector(".content").scrollIntoView({
+behavior: "smooth"
+});
 }
 
+if (page === "info") {
+content.style.display = "none";
+stats.style.display = "none";
+
+details.forEach(x => x.style.display = "none");
+
+document.getElementById("apiStatus").parentElement.style.display = "block";
 }
-
-loadData();
-
-setInterval(loadData,20000);
+}
 
 </script>
 
