@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#08111f">
+<title>Gdańsk Transport LIVE</title>
+<link rel="preconnect" href="https://unpkg.com">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{color-scheme:dark;--bg:#08111f;--panel:#101d30;--panel2:#14243a;--line:#243750;--text:#eef5ff;--muted:#91a4bd;--blue:#48a8ff;--green:#45d6a0;--orange:#ffb45e}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{padding:18px 20px 14px;background:linear-gradient(120deg,#10233b,#0a1424);border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:14px}
+.brand{display:flex;align-items:center;gap:12px}.logo{width:42px;height:42px;border-radius:13px;background:linear-gradient(145deg,#43a7ff,#2464d9);display:grid;place-items:center;font-size:22px;box-shadow:0 8px 24px #287bd844}
+h1{font-size:19px;margin:0;letter-spacing:.2px}.sub{color:var(--muted);font-size:12px;margin-top:2px}.live{font-size:12px;color:var(--green);display:flex;align-items:center;gap:7px;white-space:nowrap}.dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 12px #45d6a0}
+main{display:grid;grid-template-columns:340px 1fr;min-height:calc(100vh - 75px)}
+aside{padding:16px;border-right:1px solid var(--line);background:#0b1626;overflow:auto}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}.stat{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:12px}.stat small{color:var(--muted);display:block;font-size:11px}.stat strong{font-size:24px;display:block;margin-top:3px}
+.controls{display:flex;gap:7px;margin:12px 0}.filter{border:1px solid var(--line);background:var(--panel);color:var(--muted);padding:9px 11px;border-radius:10px;cursor:pointer;font-weight:650;flex:1}.filter.active{color:white;background:#1b3a5e;border-color:#367fc2}
+input{width:100%;background:var(--panel);border:1px solid var(--line);border-radius:11px;color:var(--text);padding:12px 13px;font:inherit;outline:none}input:focus{border-color:var(--blue)}
+.section-title{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin:18px 0 8px}
+#vehicleList{display:flex;flex-direction:column;gap:7px}.vehicle{display:flex;align-items:center;gap:10px;padding:10px;background:var(--panel);border:1px solid var(--line);border-radius:11px;cursor:pointer;text-align:left;color:var(--text)}.vehicle:hover{border-color:#4779a8;background:var(--panel2)}.badge{min-width:42px;text-align:center;border-radius:8px;padding:6px 5px;font-weight:800;background:#173b61;color:#8fcaff}.badge.tram{background:#4b2d19;color:#ffc17f}.vmeta{min-width:0}.vmeta b{display:block}.vmeta small{display:block;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
+#map{height:calc(100vh - 75px);min-height:520px;background:#172638}
+.notice{color:var(--muted);font-size:12px;margin-top:15px;line-height:1.5}.notice a{color:#8fcaff}.status{font-size:12px;color:var(--muted);margin-top:10px;min-height:18px}
+.bus-pin,.tram-pin{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;border:2px solid #fff;box-shadow:0 3px 12px #0008;font-size:17px}.bus-pin{background:#1676d2}.tram-pin{background:#c46a22}.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#102039;color:#f2f7ff}.leaflet-popup-content{margin:12px 14px}.leaflet-container a{color:#8fcaff}
+@media(max-width:800px){header{padding:14px}main{display:flex;flex-direction:column}#map{order:1;height:56vh;min-height:360px}aside{order:2;border-right:0;border-top:1px solid var(--line);overflow:visible}.stats{grid-template-columns:repeat(3,1fr)}.stat strong{font-size:20px}}
+</style>
+</head>
+<body>
+<header>
+ <div class="brand"><div class="logo">🚋</div><div><h1>Gdańsk Transport LIVE</h1><div class="sub">Autobusy i tramwaje • pozycje GPS</div></div></div>
+ <div class="live"><span class="dot"></span><span id="liveLabel">Łączenie z ZTM…</span></div>
+</header>
+<main>
+ <aside>
+  <div class="stats">
+   <div class="stat"><small>Wszystkie pojazdy</small><strong id="total">—</strong></div>
+   <div class="stat"><small>Autobusy</small><strong id="busCount">—</strong></div>
+   <div class="stat"><small>Tramwaje</small><strong id="tramCount">—</strong></div>
+  </div>
+  <input id="search" type="search" placeholder="Szukaj numeru linii lub pojazdu…">
+  <div class="controls">
+   <button class="filter active" data-filter="all">Wszystkie</button>
+   <button class="filter" data-filter="bus">🚌 Autobusy</button>
+   <button class="filter" data-filter="tram">🚋 Tramwaje</button>
+  </div>
+  <div class="section-title">Pojazdy na mapie</div>
+  <div id="vehicleList"><div class="status">Pobieranie aktualnych pozycji…</div></div>
+  <div class="status" id="status"></div>
+  <div class="notice">Dane GPS pochodzą z otwartego API ZTM Gdańsk (TRISTAR). Aktualizacja strony co 20 sekund. Pozycja może być opóźniona względem rzeczywistej o około 20 sekund.<br><br>Mapa: © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>. Dane: ZTM Gdańsk, licencja CC BY.</div>
+ </aside>
+ <div id="map" aria-label="Mapa lokalizacji autobusów i tramwajów w Gdańsku"></div>
+</main>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(() => {
+ const API='https://ckan2.multimediagdansk.pl/gpsPositions?v=2';
+ const map=L.map('map',{zoomControl:true}).setView([54.3520,18.6466],12);
+ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(map);
+ const layer=L.layerGroup().addTo(map);
+ let vehicles=[],filter='all',markers=new Map();
+ const $=id=>document.getElementById(id);
+ const val=(o,...keys)=>{for(const k of keys)if(o[k]!==undefined&&o[k]!==null&&o[k]!=='')return o[k];return null};
+ function isTram(v){
+   const explicit=String(val(v,'vehicleType','type','routeType','category')||'').toLowerCase();
+   if(explicit.includes('tram'))return true;
+   if(explicit.includes('bus'))return false;
+   // W aktualnym rozkładzie GTFS ZTM linie 2–12 są liniami tramwajowymi.
+   const n=Number(val(v,'routeShortName','line','Line'));
+   return Number.isFinite(n)&&n>=2&&n<=12;
+ }
+ function coords(v){return [Number(val(v,'lat','Lat','latitude','Latitude')),Number(val(v,'lon','Lon','longitude','Longitude'))]}
+ function visible(v){return filter==='all'||(filter==='tram'&&v.tram)||(filter==='bus'&&!v.tram)}
+ function icon(v){return L.divIcon({className:'',html:`<div class="${v.tram?'tram-pin':'bus-pin'}">${v.tram?'🚋':'🚌'}</div>`,iconSize:[34,34],iconAnchor:[17,17],popupAnchor:[0,-17]})}
+ function popup(v){
+   const delay=Number(val(v.raw,'delay','Delay'));
+   const delayText=Number.isFinite(delay)?(delay>0?`Opóźnienie: ${Math.round(delay/60)} min`:delay<0?`Przed czasem: ${Math.round(Math.abs(delay)/60)} min`:'Punktualnie'):'Brak danych o opóźnieniu';
+   return `<b>${v.tram?'Tramwaj':'Autobus'} ${esc(v.line)}</b><br>${v.dest?`Kierunek: ${esc(v.dest)}<br>`:''}Numer pojazdu: ${esc(v.code||'—')}<br>${delayText}<br>Prędkość: ${val(v.raw,'speed','Speed')??'—'} km/h`;
+ }
+ function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+ function render(){
+   layer.clearLayers();markers.clear();
+   const q=$('search').value.trim().toLowerCase();
+   const shown=vehicles.filter(v=>visible(v)&&(!q||`${v.line} ${v.code} ${v.dest}`.toLowerCase().includes(q)));
+   shown.forEach(v=>{
+     const m=L.marker([v.lat,v.lon],{icon:icon(v)}).bindPopup(popup(v)).addTo(layer);
+     markers.set(v.id,m);
+   });
+   $('vehicleList').innerHTML=shown.length?shown.slice().sort((a,b)=>String(a.line).localeCompare(String(b.line),'pl',{numeric:true})).map(v=>
+     `<button class="vehicle" data-id="${esc(v.id)}"><span class="badge ${v.tram?'tram':''}">${esc(v.line)}</span><span class="vmeta"><b>${v.tram?'Tramwaj':'Autobus'} ${esc(v.line)}</b><small>${esc(v.dest||'Kierunek niedostępny')} · ${esc(v.code||'nr pojazdu —')}</small></span></button>`
+   ).join(''):'<div class="status">Brak pojazdów pasujących do filtra.</div>';
+   $('vehicleList').querySelectorAll('.vehicle').forEach(b=>b.addEventListener('click',()=>{const m=markers.get(b.dataset.id);if(m){map.setView(m.getLatLng(),16);m.openPopup()}}));
+ }
+ async function refresh(){
+   $('liveLabel').textContent='Aktualizowanie…';
+   try{
+     const r=await fetch(API,{cache:'no-store'});
+     if(!r.ok)throw new Error(`Serwer ZTM zwrócił HTTP ${r.status}`);
+     const data=await r.json();
+     const rows=Array.isArray(data)?data:(data.vehicles||data.Vehicles||[]);
+     vehicles=rows.map((raw,i)=>{
+       const [lat,lon]=coords(raw);
+       if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180)return null;
+       const line=String(val(raw,'routeShortName','Line','line')??'?');
+       return {raw,id:String(val(raw,'vehicleId','VehicleId','vehicleCode','VehicleCode')??i),lat,lon,line,
+         code:val(raw,'vehicleCode','VehicleCode'),dest:val(raw,'headsign','destination','directionName'),tram:isTram(raw)};
+     }).filter(Boolean);
+     $('total').textContent=vehicles.length;
+     $('busCount').textContent=vehicles.filter(v=>!v.tram).length;
+     $('tramCount').textContent=vehicles.filter(v=>v.tram).length;
+     $('liveLabel').textContent='Dane na żywo';
+     $('status').textContent=`Ostatnia aktualizacja: ${new Date().toLocaleTimeString('pl-PL')} · źródło: ${data.lastUpdate||'ZTM Gdańsk'}`;
+     render();
+   }catch(e){
+     $('liveLabel').textContent='Problem z połączeniem';
+     $('status').textContent=`Nie udało się pobrać GPS: ${e.message}. Jeśli strona działa przez HTTPS, a API blokuje CORS, potrzebny będzie mały proxy na serwerze.`;
+     if(!vehicles.length)$('vehicleList').innerHTML='<div class="status">Nie udało się pobrać pozycji. Odśwież stronę lub sprawdź połączenie z API ZTM.</div>';
+   }
+ }
+ document.querySelectorAll('.filter').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.filter').forEach(x=>x.classList.remove('active'));b.classList.add('active');filter=b.dataset.filter;render()}));
+ $('search').addEventListener('input',render);
+ refresh();setInterval(refresh,20000);
+})();
+</script>
+</body>
+</html>
