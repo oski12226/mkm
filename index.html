@@ -109,7 +109,8 @@ input{width:100%;background:var(--panel);border:1px solid var(--line);border-rad
      const data=await r.json();
      const rows=Array.isArray(data)?data:(data.vehicles||data.Vehicles||[]);
      vehicles=rows.map((raw,i)=>{
-       const [lat,lon]=coords(raw);
+       const lat = Number(raw.lat);
+const lon = Number(raw.lon);
        if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180)return null;
        const line=String(val(raw,'routeShortName','Line','line')??'?');
        return {raw,id:String(val(raw,'vehicleId','VehicleId','vehicleCode','VehicleCode')??i),lat,lon,line,
