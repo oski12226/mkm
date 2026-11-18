@@ -258,6 +258,12 @@ main {
   font-weight:bold;
 }
 
+.vehicle-database {
+  display:block;
+  margin-top:5px;
+  color:var(--muted);
+  font-size:11px;
+}
 .vehicle-info {
   flex:1;
   min-width:0;
@@ -449,6 +455,11 @@ main {
 <div class="stat">
 <small>🚌 Aktywne pojazdy</small>
 <h2 id="total">—</h2>
+</div>
+
+<div class="stat">
+<small>🚋 Tramwaje</small>
+<h2 id="trams">—</h2>
 </div>
 
 <div class="stat">
@@ -660,6 +671,10 @@ let markers = {};
 let selectedVehicle = null;
 let map = null;
 let mapReady = false;
+let vehicleDatabase = new Map();
+let vehicleDatabaseLoaded = false;
+let vehicleDatabaseUpdated = null;
+const VEHICLE_DATABASE_URL = "https://files.cloudgdansk.pl/d/otwarte-dane/ztm/baza-pojazdow.json?v=2";
 
 /* MAPA */
 
@@ -720,6 +735,62 @@ return [lat,lon];
 }
 
 return null;
+}
+
+function normalizeVehicleCode(value) {
+return String(value ?? "").trim().toUpperCase();
+}
+
+function getVehicleRecord(v) {
+const code = normalizeVehicleCode(v.vehicleCode);
+return code ? (vehicleDatabase.get(code) ?? null) : null;
+}
+
+function getVehicleType(v) {
+const record = getVehicleRecord(v);
+if (record?.transportationType) return record.transportationType;
+
+const route = String(v.routeShortName ?? "").trim().toUpperCase();
+if (/^M\\d+$/.test(route)) return "Metrowóz";
+if (/^T\\d+$/.test(route)) return "Autobus zastępczy";
+if (/^N\\d+$/.test(route)) return "Autobus nocny";
+if (["2","3","5","6","7","8","9","10","11","12"].includes(route)) return "Tramwaj";
+if (/^\\d+$/.test(route) && Number(route) >= 100) return "Autobus";
+return "Nieustalony typ";
+}
+
+function getVehicleOperator(v) {
+const record = getVehicleRecord(v);
+return record?.carrirer || "Brak w bazie danych";
+}
+
+async function loadVehicleDatabase() {
+try {
+const response = await fetch(VEHICLE_DATABASE_URL, {cache:"no-store"});
+if (!response.ok) throw new Error("HTTP " + response.status);
+const data = await response.json();
+if (!Array.isArray(data.results)) throw new Error("Nieprawidłowy format bazy ZTM");
+
+vehicleDatabase = new Map(
+data.results.map(record => [normalizeVehicleCode(record.vehicleCode), record])
+);
+vehicleDatabaseLoaded = true;
+vehicleDatabaseUpdated = data.metadata?.sourceDate ?? null;
+
+$("apiStatus").innerHTML =
+'<span class="status-ok">● Baza pojazdów ZTM załadowana</span><br>' +
+vehicleDatabase.size + ' rekordów · aktualizacja źródła: ' +
+(vehicleDatabaseUpdated ? formatTime(vehicleDatabaseUpdated) : "brak daty");
+
+renderVehicles();
+updateMap();
+if (selectedVehicle) selectVehicle(selectedVehicle);
+} catch(error) {
+vehicleDatabaseLoaded = false;
+console.warn("Nie udało się pobrać bazy pojazdów ZTM:", error);
+$("apiStatus").textContent =
+"Baza pojazdów ZTM jest chwilowo niedostępna. Nie można potwierdzić, czy numer taborowy znajduje się w bazie.";
+}
 }
 
 function getDelay(v) {
@@ -828,8 +899,12 @@ const lateCount = vehicles.filter(
 v=>getDelay(v)>180
 ).length;
 
+const tramCount = vehicles.filter(v => getVehicleType(v) === "Tramwaj").length;
+const busCount = vehicles.filter(v => ["Autobus","Autobus nocny","Autobus zastępczy","Metrowóz"].includes(getVehicleType(v))).length;
+
 $("total").textContent = vehicles.length;
-$("buses").textContent = vehicles.length;
+$("trams").textContent = tramCount;
+$("buses").textContent = busCount;
 $("routes").textContent = routeCount;
 $("late").textContent = lateCount;
 
@@ -859,13 +934,14 @@ if (!pos || !id) return;
 
 active.add(id);
 
+const vehicleType = getVehicleType(v);
 const icon = L.divIcon({
 
 className:"",
 
 html:`
 <div style="
-background:#168cff;
+background:${vehicleType === "Tramwaj" ? "#d97706" : vehicleType === "Autobus zastępczy" ? "#dc465c" : "#168cff"};
 border:2px solid white;
 width:30px;
 height:30px;
@@ -875,7 +951,7 @@ place-items:center;
 box-shadow:0 3px 12px #0008;
 font-size:15px;
 ">
-🚌
+${vehicleType === "Tramwaj" ? "🚋" : "🚌"}
 </div>
 `,
 
@@ -902,6 +978,8 @@ markers[id].setLatLng(pos);
 
 markers[id].bindPopup(`
 <b>Linia ${v.routeShortName ?? "?"}</b><br>
+Typ: ${vehicleType}<br>
+Przewoźnik: ${getVehicleOperator(v)}<br>
 Kierunek: ${v.headsign ?? "Nieznany"}<br>
 Pojazd: ${v.vehicleCode ?? id}<br>
 Prędkość: ${v.speed ?? "—"} km/h
@@ -954,7 +1032,13 @@ meta.textContent =
 "Nr "+(v.vehicleCode ?? id)+
 " · "+(v.speed ?? "—")+" km/h";
 
-info.append(title,meta);
+const databaseInfo = document.createElement("small");
+databaseInfo.className = "vehicle-database";
+const record = getVehicleRecord(v);
+databaseInfo.textContent = record
+  ? getVehicleType(v) + " · " + getVehicleOperator(v)
+  : (vehicleDatabaseLoaded ? "Brak w bazie danych" : "Baza ZTM niedostępna");
+info.append(title,meta,databaseInfo);
 
 const delay = document.createElement("div");
 delay.className = "delay";
@@ -986,7 +1070,11 @@ v.routeShortName,
 v.headsign,
 v.vehicleCode,
 v.vehicleService,
-v.vehicleId
+v.vehicleId,
+getVehicleType(v),
+getVehicleOperator(v),
+getVehicleRecord(v)?.brand,
+getVehicleRecord(v)?.model
 ].some(x=>
 String(x ?? "").toLowerCase().includes(query)
 )
@@ -1049,8 +1137,12 @@ markers[id].openPopup();
 const fields = [
 
 ["Linia",v.routeShortName],
-["Kierunek",v.headsign],
+["Typ pojazdu",getVehicleType(v)],
+["Przewoźnik",getVehicleOperator(v)],
 ["Numer pojazdu",v.vehicleCode ?? v.vehicleId],
+["Status w bazie ZTM",getVehicleRecord(v) ? "Znaleziono w bazie danych" : (vehicleDatabaseLoaded ? "Brak w bazie danych" : "Baza ZTM niedostępna")],
+["Marka / model",getVehicleRecord(v) ? [getVehicleRecord(v).brand,getVehicleRecord(v).model].filter(Boolean).join(" ") : "—"],
+["Rok produkcji",getVehicleRecord(v)?.productionYear ?? "—"],
 ["Brygada",v.vehicleService],
 ["Prędkość",(v.speed ?? "—")+" km/h"],
 ["Opóźnienie",delayLabel(v)],
@@ -1152,6 +1244,7 @@ $("search2").addEventListener("input",renderVehicles);
 
 initMap();
 
+loadVehicleDatabase();
 loadData();
 
 setInterval(loadData,20000);
