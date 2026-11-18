@@ -801,6 +801,10 @@ const $ = id => document.getElementById(id);
 
 let vehicles = [];
 let markers = {};
+const vehicleIconCache = new Map();
+let vehiclesRevision = 0;
+const renderedListKeys = new Map();
+let loadDataPromise = null;
 let selectedVehicle = null;
 let vehicleSortMode = "line";
 let map = null;
@@ -982,6 +986,8 @@ minute:"2-digit"
 
 async function loadData() {
 
+if(loadDataPromise) return loadDataPromise;
+loadDataPromise = (async()=>{
 const connection = $("connection");
 
 connection.textContent = "● Pobieranie...";
@@ -1005,6 +1011,8 @@ throw new Error("Brak tablicy vehicles");
 }
 
 vehicles = data.vehicles;
+vehiclesRevision++;
+renderedListKeys.clear();
 
 connection.textContent = "● Dane aktualne";
 
@@ -1034,11 +1042,11 @@ $("apiStatus").textContent =
 console.error("API error:",error);
 
 } finally {
-
 $("refresh").disabled = false;
-
+loadDataPromise = null;
 }
-
+})();
+return loadDataPromise;
 }
 
 /* STATYSTYKI */
@@ -1093,7 +1101,9 @@ const routeLabel = String(v.routeShortName ?? "?").replace(/[&<>"']/g, ch => ({
   "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
 })[ch]);
 const routeFontSize = routeLabel.length > 4 ? 7 : routeLabel.length > 3 ? 8 : routeLabel.length > 2 ? 9 : 10;
-const icon = L.divIcon({
+const iconKey = vehicleType+"|"+routeLabel;
+let icon = vehicleIconCache.get(iconKey);
+if (!icon) icon = L.divIcon({
 
 className:"",
 
@@ -1108,12 +1118,17 @@ iconSize:[38,38],
 iconAnchor:[19,19]
 
 });
+if (!vehicleIconCache.has(iconKey)) {
+  vehicleIconCache.set(iconKey,icon);
+  if(vehicleIconCache.size>300) vehicleIconCache.delete(vehicleIconCache.keys().next().value);
+}
 
 if (!markers[id]) {
 
 markers[id] = L.marker(pos,{
 icon
 }).addTo(map);
+markers[id]._vehicleIconKey=iconKey;
 
 markers[id].on("click",()=>{
 selectVehicle(id);
@@ -1121,8 +1136,13 @@ selectVehicle(id);
 
 } else {
 
-markers[id].setLatLng(pos);
-markers[id].setIcon(icon);
+const marker=markers[id];
+const current=marker.getLatLng();
+if(Math.abs(current.lat-pos[0])>0.000001 || Math.abs(current.lng-pos[1])>0.000001) marker.setLatLng(pos);
+if(marker._vehicleIconKey!==iconKey) {
+  marker.setIcon(icon);
+  marker._vehicleIconKey=iconKey;
+}
 
 }
 
@@ -1277,7 +1297,9 @@ return div;
 
 function renderList(inputId,listId,countId) {
 
-const query = $(inputId).value.toLowerCase();
+const query = $(inputId).value.trim().toLocaleLowerCase("pl");
+const listKey=[vehiclesRevision,query,vehicleSortMode,selectedVehicle,vehicleDatabaseLoaded].join("|");
+if(renderedListKeys.get(listId)===listKey) return;
 
 const filtered = vehicles.filter(v=>
 
@@ -1331,6 +1353,7 @@ return;
 filtered.forEach(v=>{
 list.appendChild(createVehicleElement(v));
 });
+renderedListKeys.set(listId,listKey);
 
 }
 
@@ -1539,6 +1562,7 @@ async function renderVehicleNextStops(v,host,trip,token) {
 
 function clearVehicleSelection() {
   selectedVehicleToken++;
+  renderedListKeys.clear();
   if(selectedVehicle && markers[selectedVehicle]) markers[selectedVehicle].setZIndexOffset(0);
   selectedVehicle=null;
   clearSelectedRoute();
@@ -1552,6 +1576,7 @@ const v = vehicles.find(x=>getId(x)===id);
 if (!v) return;
 
 selectedVehicle = id;
+renderedListKeys.clear();
 const token=++selectedVehicleToken;
 const pos = getPosition(v);
 const trip=gtfsLoaded ? await findVehicleTripForSchedule(v) : null;
