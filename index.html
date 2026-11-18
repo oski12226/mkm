@@ -238,7 +238,7 @@ main {
 .search:focus {border-color:var(--blue)}
 .stop-search-wrap {padding:10px 13px 0;background:var(--panel)}
 .stop-search-wrap .search {margin:0}
-.stop-marker {width:25px;height:25px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#f4c542;border:2px solid #fff;color:#172033;font-size:13px;font-weight:900;box-shadow:0 2px 8px #0009}
+.stop-marker {width:15px;height:15px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#f4c542;border:1px solid #fff;color:#172033;font-size:7px;font-weight:900;box-shadow:0 1px 4px #0008}
 .stop-popup-title {font-weight:800;font-size:14px;margin-bottom:7px}
 .stop-departures {max-height:220px;overflow:auto;min-width:210px}
 .stop-departure {display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-top:1px solid #34445b;font-size:12px}
@@ -1139,7 +1139,7 @@ function renderStopMarkers() {
   gtfs.stops.forEach(stop=>{
     const lat=Number(stop.stop_lat), lon=Number(stop.stop_lon);
     if(!stop.stop_id || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
-    const marker=L.marker([lat,lon],{icon:L.divIcon({className:"",html:'<div class="stop-marker">●</div>',iconSize:[25,25],iconAnchor:[12,12]})});
+    const marker=L.marker([lat,lon],{zIndexOffset:-1000,icon:L.divIcon({className:"",html:'<div class="stop-marker">●</div>',iconSize:[15,15],iconAnchor:[7,7]})});
     marker.bindPopup('<div class="stop-popup-title">'+escapeHtml(stop.stop_name||"Przystanek")+'</div><div class="stop-muted">Ładowanie najbliższych odjazdów…</div>');
     marker.on("click",()=>showStopDepartures(stop,marker));
     marker.addTo(stopLayer); stopMarkers.set(stop.stop_id,{marker,stop});
