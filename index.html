@@ -838,23 +838,17 @@ $("connection").textContent = "● Błąd Leaflet";
 return;
 }
 
-map = L.map("map",{preferCanvas:true}).setView([54.352,18.646],12);
+map = L.map("map").setView([54.352,18.646],12);
 
 L.tileLayer(
 "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
 {
 attribution:"© OpenStreetMap contributors",
 subdomains:["a","b","c"],
-maxZoom:19,
-updateWhenIdle:true,
-updateWhenZooming:false,
-keepBuffer:2,
-updateInterval:150
+maxZoom:19
 }
 ).addTo(map);
 
-map.createPane("stopsPane");
-map.getPane("stopsPane").style.zIndex=350;
 
 mapReady = true;
 
@@ -1127,9 +1121,8 @@ selectVehicle(id);
 
 } else {
 
-const current=markers[id].getLatLng();
-if(current.lat!==pos[0]||current.lng!==pos[1]) markers[id].setLatLng(pos);
-if(markers[id].options.icon!==icon) markers[id].setIcon(icon);
+markers[id].setLatLng(pos);
+markers[id].setIcon(icon);
 
 }
 
@@ -1162,7 +1155,7 @@ function renderStopMarkers() {
   gtfs.stops.forEach(stop=>{
     const lat=Number(stop.stop_lat), lon=Number(stop.stop_lon);
     if(!stop.stop_id || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
-    const marker=L.circleMarker([lat,lon],{pane:"stopsPane",renderer:L.canvas({padding:0.5}),radius:7.5,color:"#fff",weight:1,fillColor:"#f4c542",fillOpacity:1,interactive:true});
+    const marker=L.marker([lat,lon],{zIndexOffset:-1000,icon:L.divIcon({className:"",html:'<div class="stop-marker">●</div>',iconSize:[15,15],iconAnchor:[7,7]})});
     marker.bindPopup('<div class="stop-popup-title">'+escapeHtml(stop.stop_name||"Przystanek")+'</div><div class="stop-muted">Ładowanie najbliższych odjazdów…</div>');
     marker.on("click",()=>showStopDepartures(stop,marker));
     marker.addTo(stopLayer); stopMarkers.set(stop.stop_id,{marker,stop});
