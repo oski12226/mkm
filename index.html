@@ -246,7 +246,10 @@ main {
 #stopSearchResults {position:relative;z-index:1000;max-height:220px;overflow-y:auto}
 #stopSearchResults:empty {display:none}
 #stopSearchResults:not(:empty) {margin-top:6px;border:1px solid var(--border);border-radius:9px;background:var(--panel);overflow:hidden;box-shadow:0 5px 16px #0005}
-#map {border-radius:0 0 14px 14px;overflow:hidden;clip-path:inset(0 round 0 0 14px 14px);}
+#map {border-radius:0 0 14px 14px;overflow:hidden;clip-path:inset(0 round 0 0 14px 14px);touch-action:pan-x pan-y}
+#map .leaflet-marker-icon {touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+#map .leaflet-marker-icon > div {pointer-events:auto}
+#map .leaflet-marker-pane {z-index:650}
 .stop-marker {width:15px;height:15px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#f4c542;border:1px solid #fff;color:#172033;font-size:7px;font-weight:900;box-shadow:0 1px 4px #0008}
 .vehicle-next-stops {margin-top:14px;padding-top:12px;border-top:1px solid var(--border)}
 .vehicle-next-stops h4 {margin:0 0 9px;font-size:13px}
@@ -1127,7 +1130,12 @@ if (!vehicleIconCache.has(iconKey)) {
 if (!markers[id]) {
 
 markers[id] = L.marker(pos,{
-icon
+icon,
+zIndexOffset:1200,
+riseOnHover:true,
+bubblingMouseEvents:false,
+autoPanOnFocus:false,
+keyboard:true
 }).addTo(map);
 markers[id]._vehicleIconKey=iconKey;
 
