@@ -236,6 +236,17 @@ main {
 }
 
 .search:focus {border-color:var(--blue)}
+.stop-search-wrap {padding:10px 13px 0;background:var(--panel)}
+.stop-search-wrap .search {margin:0}
+.stop-marker {width:25px;height:25px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#f4c542;border:2px solid #fff;color:#172033;font-size:13px;font-weight:900;box-shadow:0 2px 8px #0009}
+.stop-popup-title {font-weight:800;font-size:14px;margin-bottom:7px}
+.stop-departures {max-height:220px;overflow:auto;min-width:210px}
+.stop-departure {display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-top:1px solid #34445b;font-size:12px}
+.stop-departure strong {color:#9fcaff;font-variant-numeric:tabular-nums}
+.stop-muted {color:#a9b8cc;font-size:12px}
+.stop-result {cursor:pointer;padding:7px 10px;border-bottom:1px solid var(--border);font-size:12px}
+.stop-result:hover {background:#1a304b}
+
 .sort-controls {display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin:0 0 12px;color:var(--muted);font-size:12px}
 .sort-button {border:1px solid var(--border);background:#0b1727;color:var(--muted);padding:8px 10px;border-radius:8px;font-size:12px;transition:.2s}
 .sort-button:hover {border-color:var(--blue);color:white}
@@ -547,6 +558,7 @@ main {
 <small id="mapCount">0 pojazdów</small>
 </div>
 
+<div class="stop-search-wrap"><input class="search" id="stopSearch" placeholder="Szukaj przystanku..." aria-label="Szukaj przystanku"><div id="stopSearchResults"></div></div>
 <div id="map"></div>
 
 </section>
@@ -735,6 +747,7 @@ Oczekiwanie na dane...
 
 <div class="info">
 <b>Gdańsk Transit</b><br>
+Wersja: <b id="appVersion">1.1.0</b> · wydanie z obsługą przystanków<br>
 Niezależny projekt prezentujący informacje o komunikacji miejskiej w Gdańsku.<br><br>
 
 Źródło danych: Otwarty Gdańsk.<br>
@@ -783,6 +796,11 @@ const GTFS_URL = "https://ckan.multimediagdansk.pl/dataset/c24aa637-3619-4dc2-a1
 let gtfs = {routes:[],trips:[],stops:[],calendar:[],calendarDates:[]};
 let gtfsShapes = new Map();
 let selectedRouteLayer = null;
+let stopMarkers = new Map();
+let stopLayer = null;
+let stopTimesIndexPromise = null;
+let stopTimesIndex = new Map();
+const APP_VERSION = "1.1.0";
 let gtfsStopTimesFile = null;
 let gtfsLoaded = false;
 let gtfsStopTimesLoading = false;
@@ -1112,6 +1130,79 @@ active.size+" pojazdów";
 
 }
 
+/* PRZYSTANKI I ODJAZDY */
+function renderStopMarkers() {
+  if(!mapReady || !gtfsLoaded) return;
+  if(stopLayer) map.removeLayer(stopLayer);
+  stopLayer=L.layerGroup().addTo(map);
+  stopMarkers.clear();
+  gtfs.stops.forEach(stop=>{
+    const lat=Number(stop.stop_lat), lon=Number(stop.stop_lon);
+    if(!stop.stop_id || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    const marker=L.marker([lat,lon],{icon:L.divIcon({className:"",html:'<div class="stop-marker">●</div>',iconSize:[25,25],iconAnchor:[12,12]})});
+    marker.bindPopup('<div class="stop-popup-title">'+escapeHtml(stop.stop_name||"Przystanek")+'</div><div class="stop-muted">Ładowanie najbliższych odjazdów…</div>');
+    marker.on("click",()=>showStopDepartures(stop,marker));
+    marker.addTo(stopLayer); stopMarkers.set(stop.stop_id,{marker,stop});
+  });
+}
+function escapeHtml(value) {
+  return String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+}
+function searchStops() {
+  const q=$("stopSearch").value.trim().toLocaleLowerCase("pl"), host=$("stopSearchResults");
+  host.replaceChildren(); if(!q || !gtfsLoaded) return;
+  const matches=gtfs.stops.filter(st=>String(st.stop_name||"").toLocaleLowerCase("pl").includes(q)).slice(0,8);
+  matches.forEach(stop=>{
+    const item=document.createElement("div"); item.className="stop-result";
+    item.textContent=stop.stop_name+(stop.stop_code?" · "+stop.stop_code:"");
+    item.addEventListener("click",()=>{
+      const found=stopMarkers.get(stop.stop_id);
+      if(found && mapReady) { map.setView(found.marker.getLatLng(),17); found.marker.openPopup(); showStopDepartures(stop,found.marker); }
+      host.replaceChildren();
+    }); host.append(item);
+  });
+  if(!matches.length) {const empty=document.createElement("div");empty.className="stop-result stop-muted";empty.textContent="Nie znaleziono przystanku.";host.append(empty);}
+}
+async function buildStopTimesIndex() {
+  if(stopTimesIndexPromise) return stopTimesIndexPromise;
+  stopTimesIndexPromise=(async()=>{
+    if(!gtfsStopTimesFile) throw new Error("Brak danych odjazdów GTFS");
+    const active=activeGtfsServices(new Date().toLocaleDateString("en-CA"));
+    const trips=new Map(gtfs.trips.filter(t=>active.has(t.service_id)).map(t=>[t.trip_id,t]));
+    const routes=new Map(gtfs.routes.map(r=>[r.route_id,r]));
+    const csv=await gtfsStopTimesFile.async("string"), end=csv.indexOf("\n");
+    const headers=csv.slice(0,end).replace(/\r$/,"").split(",");
+    const ix={trip:headers.indexOf("trip_id"),arrival:headers.indexOf("arrival_time"),departure:headers.indexOf("departure_time"),stop:headers.indexOf("stop_id")};
+    if(Object.values(ix).some(n=>n<0)) throw new Error("Nieprawidłowy plik odjazdów");
+    let pos=end+1,nl;
+    while((nl=csv.indexOf("\n",pos))!==-1) {
+      const cols=csv.slice(pos,nl).replace(/\r$/,"").split(","); pos=nl+1;
+      const trip=trips.get(cols[ix.trip]); if(!trip) continue;
+      const stopId=cols[ix.stop], time=cols[ix.departure]||cols[ix.arrival]; if(!stopId||!time) continue;
+      if(!stopTimesIndex.has(stopId)) stopTimesIndex.set(stopId,[]);
+      stopTimesIndex.get(stopId).push({time,route:routes.get(trip.route_id)?.route_short_name||trip.route_id,headsign:trip.trip_headsign||""});
+    }
+    stopTimesIndex.forEach(rows=>rows.sort((a,b)=>a.time.localeCompare(b.time)));
+    return stopTimesIndex;
+  })();
+  return stopTimesIndexPromise;
+}
+function gtfsTimeSeconds(value) {
+  const p=String(value||"").split(":").map(Number);
+  return (p[0]||0)*3600+(p[1]||0)*60+(p[2]||0);
+}
+async function showStopDepartures(stop,marker) {
+  const title='<div class="stop-popup-title">'+escapeHtml(stop.stop_name||"Przystanek")+'</div>';
+  marker.setPopupContent(title+'<div class="stop-muted">Wczytywanie odjazdów…</div>').openPopup();
+  try {
+    await buildStopTimesIndex();
+    const now=new Date(), seconds=now.getHours()*3600+now.getMinutes()*60+now.getSeconds();
+    const rows=(stopTimesIndex.get(stop.stop_id)||[]).filter(x=>gtfsTimeSeconds(x.time)>=seconds-60).slice(0,8);
+    const body=rows.length?rows.map(x=>'<div class="stop-departure"><strong>'+escapeHtml(x.time.slice(0,5))+' · '+escapeHtml(x.route)+'</strong><span>'+escapeHtml(x.headsign||"—")+'</span></div>').join(""):'<div class="stop-muted">Brak kolejnych odjazdów w dzisiejszym rozkładzie.</div>';
+    marker.setPopupContent(title+'<div class="stop-departures">'+body+'</div><div class="stop-muted" style="margin-top:7px">Rozkład GTFS · dzisiaj</div>').openPopup();
+  } catch(error) { marker.setPopupContent(title+'<div class="stop-muted">Nie udało się pobrać odjazdów: '+escapeHtml(error.message)+'</div>').openPopup(); }
+}
+
 /* LISTA POJAZDÓW */
 
 function createVehicleElement(v) {
@@ -1420,6 +1511,7 @@ async function loadGtfs() {
     });
     gtfsShapes.forEach(points=>points.sort((a,b)=>a.sequence-b.sequence));
     gtfsLoaded=true;
+    renderStopMarkers();
     status.textContent=routes.length+" linii · "+trips.length+" kursów · "+gtfsShapes.size+" tras";
     renderDutyLines();
     if(selectedVehicle) selectVehicle(selectedVehicle);
@@ -1653,6 +1745,7 @@ showPage(button.dataset.page);
 
 $("refresh").addEventListener("click",loadData);
 $("dutySearch").addEventListener("input",renderDutyLines);
+$("stopSearch").addEventListener("input",searchStops);
 $("dutyDate").addEventListener("change",()=>{
   selectedDutyKey=null;
   $("dutyDetailTitle").textContent="Rozkład brygadowy";
@@ -1682,6 +1775,7 @@ document.querySelectorAll(".sort-button").forEach(button=>{
 
 initMap();
 
+$("appVersion").textContent=APP_VERSION;
 $("dutyDate").value=new Date().toLocaleDateString("en-CA");
 loadGtfs();
 loadVehicleDatabase();
