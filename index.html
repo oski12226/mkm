@@ -781,6 +781,8 @@ let vehicleDatabaseUpdated = null;
 const VEHICLE_DATABASE_URL = "https://files.cloudgdansk.pl/d/otwarte-dane/ztm/baza-pojazdow.json?v=2";
 const GTFS_URL = "https://ckan.multimediagdansk.pl/dataset/c24aa637-3619-4dc2-a171-a23eec8f2172/resource/30e783e4-2bec-4a7d-bb22-ee3e3b26ca96/download/gtfsgoogle.zip";
 let gtfs = {routes:[],trips:[],stops:[],calendar:[],calendarDates:[]};
+let gtfsShapes = new Map();
+let selectedRouteLayer = null;
 let gtfsStopTimesFile = null;
 let gtfsLoaded = false;
 let gtfsStopTimesLoading = false;
@@ -1232,6 +1234,51 @@ renderList("search2","vehicleList2","count2");
 
 }
 
+/* TRASA WYBRANEGO POJAZDU */
+
+function clearSelectedRoute() {
+  if(selectedRouteLayer && mapReady) map.removeLayer(selectedRouteLayer);
+  selectedRouteLayer=null;
+}
+
+function findVehicleTrip(v) {
+  if(!gtfsLoaded || !gtfs.trips.length) return null;
+  const tripId=String(v.tripId ?? v.trip_id ?? v.tripID ?? v.trip?.tripId ?? v.trip?.trip_id ?? "").trim();
+  if(tripId) {
+    const exact=gtfs.trips.find(t=>t.trip_id===tripId);
+    if(exact) return exact;
+  }
+
+  const routeName=String(v.routeShortName ?? "").trim().toLowerCase();
+  const headsign=String(v.headsign ?? v.destination ?? "").trim().toLowerCase();
+  if(!routeName || !headsign) return null;
+  const routeIds=new Set(gtfs.routes
+    .filter(r=>String(r.route_short_name ?? "").trim().toLowerCase()===routeName)
+    .map(r=>r.route_id));
+  const matches=gtfs.trips.filter(t=>
+    routeIds.has(t.route_id) &&
+    String(t.trip_headsign ?? "").trim().toLowerCase()===headsign &&
+    t.shape_id && gtfsShapes.has(t.shape_id)
+  );
+  return matches.length===1 ? matches[0] : null;
+}
+
+function showVehicleRoute(v) {
+  clearSelectedRoute();
+  if(!mapReady || !gtfsLoaded) return false;
+  const trip=findVehicleTrip(v);
+  if(!trip?.shape_id) return false;
+  const points=gtfsShapes.get(trip.shape_id);
+  if(!points || points.length<2) return false;
+  const coordinates=points.map(point=>point.position);
+  const casing=L.polyline(coordinates,{color:"#ffffff",weight:9,opacity:.95,lineCap:"round",lineJoin:"round"});
+  const route=L.polyline(coordinates,{color:"#245bff",weight:5,opacity:1,lineCap:"round",lineJoin:"round"});
+  selectedRouteLayer=L.layerGroup([casing,route]).addTo(map);
+  if(markers[getId(v)]) markers[getId(v)].setZIndexOffset(1000);
+  map.fitBounds(route.getBounds(),{padding:[35,35],maxZoom:15});
+  return true;
+}
+
 /* SZCZEGÓŁY */
 
 function selectVehicle(id) {
@@ -1245,13 +1292,8 @@ selectedVehicle = id;
 const pos = getPosition(v);
 
 if (pos && mapReady) {
-
-map.setView(pos,15);
-
-if (markers[id]) {
-markers[id].openPopup();
-}
-
+  if (!showVehicleRoute(v)) map.setView(pos,15);
+  if (markers[id]) markers[id].openPopup();
 }
 
 const fields = [
@@ -1359,16 +1401,28 @@ async function loadGtfs() {
       const file=zip.file(name);
       return file ? parseGtfsCsv(await file.async("string")) : [];
     };
-    const [routes,trips,stops,calendar,calendarDates]=await Promise.all([
+    const [routes,trips,stops,calendar,calendarDates,shapeRows]=await Promise.all([
       read("routes.txt"),read("trips.txt"),read("stops.txt"),
-      read("calendar.txt"),read("calendar_dates.txt")
+      read("calendar.txt"),read("calendar_dates.txt"),read("shapes.txt")
     ]);
     gtfsStopTimesFile=zip.file("stop_times.txt");
     if (!routes.length || !trips.length || !gtfsStopTimesFile) throw new Error("Brak wymaganych plików GTFS");
     gtfs={routes,trips,stops,calendar,calendarDates};
+    gtfsShapes=new Map();
+    shapeRows.forEach(point=>{
+      const lat=Number(point.shape_pt_lat),lon=Number(point.shape_pt_lon);
+      if(!point.shape_id || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
+      if(!gtfsShapes.has(point.shape_id)) gtfsShapes.set(point.shape_id,[]);
+      gtfsShapes.get(point.shape_id).push({
+        sequence:Number(point.shape_pt_sequence)||0,
+        position:[lat,lon]
+      });
+    });
+    gtfsShapes.forEach(points=>points.sort((a,b)=>a.sequence-b.sequence));
     gtfsLoaded=true;
-    status.textContent=routes.length+" linii · "+trips.length+" kursów w pliku GTFS";
+    status.textContent=routes.length+" linii · "+trips.length+" kursów · "+gtfsShapes.size+" tras";
     renderDutyLines();
+    if(selectedVehicle) selectVehicle(selectedVehicle);
   } catch(error) {
     gtfsLoaded=false;
     status.textContent="Nie udało się pobrać rozkładów: "+error.message;
