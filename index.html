@@ -1173,6 +1173,14 @@ String(x ?? "").toLowerCase().includes(query)
 
 );
 
+// Stała kolejność: najpierw numer linii (naturalnie, np. 2, 3, 10, 117, 210),
+// następnie kierunek i numer pojazdu. Działa identycznie w obu widokach listy.
+filtered.sort((a,b)=>
+  String(a.routeShortName ?? "").localeCompare(String(b.routeShortName ?? ""), "pl", {numeric:true,sensitivity:"base"}) ||
+  String(a.headsign ?? "").localeCompare(String(b.headsign ?? ""), "pl", {numeric:true,sensitivity:"base"}) ||
+  String(a.vehicleCode ?? getId(a)).localeCompare(String(b.vehicleCode ?? getId(b)), "pl", {numeric:true,sensitivity:"base"})
+);
+
 $(countId).textContent =
 filtered.length+" wyników";
 
