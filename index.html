@@ -816,6 +816,8 @@ let selectedRouteLayer = null;
 let selectedVehicleToken = 0;
 let gtfsStopTimesIndexPromise = null;
 let gtfsStopTimesByTrip = null;
+let gtfsStopsById = null;
+const routeCoordinatesCache = new Map();
 let stopMarkers = new Map();
 let stopLayer = null;
 let stopTimesIndexPromise = null;
@@ -1123,14 +1125,7 @@ markers[id].setIcon(icon);
 
 }
 
-markers[id].bindPopup(`
-<b>Linia ${v.routeShortName ?? "?"}</b><br>
-Typ: ${vehicleType}<br>
-Przewoźnik: ${getVehicleOperator(v)}<br>
-Kierunek: ${v.headsign ?? "Nieznany"}<br>
-Pojazd: ${v.vehicleCode ?? id}<br>
-Prędkość: ${v.speed ?? "—"} km/h
-`);
+// Szczegóły pojazdu są wyświetlane wyłącznie w panelu bocznym.
 
 });
 
@@ -1422,8 +1417,15 @@ async function showVehicleRoute(v,trip) {
   clearSelectedRoute();
   if(!mapReady || !gtfsLoaded || !trip) return false;
   let coordinates=[];
-  const points=trip.shape_id ? gtfsShapes.get(trip.shape_id) : null;
-  if(points?.length>1) coordinates=points.map(point=>point.position);
+  const shapeKey=trip.shape_id||"";
+  if(shapeKey && routeCoordinatesCache.has(shapeKey)) coordinates=routeCoordinatesCache.get(shapeKey);
+  else {
+    const points=shapeKey ? gtfsShapes.get(shapeKey) : null;
+    if(points?.length>1) {
+      coordinates=points.map(point=>point.position);
+      if(shapeKey) routeCoordinatesCache.set(shapeKey,coordinates);
+    }
+  }
   // Awaryjnie odtwórz przebieg kursu z kolejności przystanków, gdy GTFS nie ma geometrii shape.
   if(coordinates.length<2 && gtfsStopTimesFile) {
     const byTrip=await getGtfsStopTimesByTrip();
@@ -1459,11 +1461,7 @@ async function showVehicleRoute(v,trip) {
   selectedRouteLayer=L.layerGroup(layers).addTo(map);
   const id=getId(v);
   if(markers[id]) markers[id].setZIndexOffset(2200);
-  const bounds=route.getBounds();
-  const pos=getPosition(v);
-  if(pos) bounds.extend(pos);
-  map.fitBounds(bounds,{padding:[55,55],maxZoom:16});
-  return true;
+  return true; // Nie zmieniaj poziomu zoomu ani widoku mapy tutaj.
 }
 
 async function getGtfsStopTimesByTrip() {
@@ -1499,7 +1497,7 @@ async function renderVehicleNextStops(v,host,trip,token) {
     const byTrip=await getGtfsStopTimesByTrip();
     if(token!==undefined && token!==selectedVehicleToken) return;
     const rows=byTrip.get(trip.trip_id)||[];
-    const stopMap=new Map(gtfs.stops.map(st=>[st.stop_id,st]));
+    const stopMap=gtfsStopsById||(gtfsStopsById=new Map(gtfs.stops.map(st=>[st.stop_id,st])));
     const now=new Date(), nowSec=now.getHours()*3600+now.getMinutes()*60+now.getSeconds();
     const delay=Number(v.delay)||0;
     const upcoming=rows.map(row=>({...row,estimated:gtfsTimeSeconds(row.arrival_time||row.departure_time)+delay})).filter(row=>row.estimated>=nowSec-30).slice(0,6);
@@ -1547,8 +1545,10 @@ const pos = getPosition(v);
 const trip=gtfsLoaded ? await findVehicleTripForSchedule(v) : null;
 if(token!==selectedVehicleToken || selectedVehicle!==id) return;
 if (pos && mapReady) {
-  if (!(await showVehicleRoute(v,trip))) map.setView(pos,15);
-  if (markers[id]) markers[id].openPopup();
+  await showVehicleRoute(v,trip);
+  if(token!==selectedVehicleToken || selectedVehicle!==id) return;
+  // Wycentruj pojazd, zachowując dokładnie aktualny poziom przybliżenia.
+  map.panTo(pos,{animate:true,duration:.35});
 }
 
 const fields = [
@@ -1666,7 +1666,7 @@ async function loadGtfs() {
       read("calendar.txt"),read("calendar_dates.txt"),read("shapes.txt")
     ]);
     gtfsStopTimesFile=zip.file("stop_times.txt");
-    gtfsStopTimesIndexPromise=null; gtfsStopTimesByTrip=null;
+    gtfsStopTimesIndexPromise=null; gtfsStopTimesByTrip=null; gtfsStopsById=null;
     if (!routes.length || !trips.length || !gtfsStopTimesFile) throw new Error("Brak wymaganych plików GTFS");
     gtfs={routes,trips,stops,calendar,calendarDates};
     gtfsShapes=new Map();
