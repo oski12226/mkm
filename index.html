@@ -1029,20 +1029,26 @@ html:`
 <div style="
 background:${vehicleType === "Tramwaj" ? "#d97706" : vehicleType === "Autobus zastępczy" ? "#dc465c" : "#168cff"};
 border:2px solid white;
-width:30px;
-height:30px;
+width:36px;
+height:36px;
+box-sizing:border-box;
 border-radius:50%;
-display:grid;
-place-items:center;
+display:flex;
+align-items:center;
+justify-content:center;
+overflow:hidden;
+white-space:nowrap;
+line-height:1;
 box-shadow:0 3px 12px #0008;
-font-size:15px;
+font-size:17px;
+font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif;
 ">
 ${vehicleType === "Tramwaj" ? "🚋" : "🚌"}
 </div>
 `,
 
-iconSize:[30,30],
-iconAnchor:[15,15]
+iconSize:[36,36],
+iconAnchor:[18,18]
 
 });
 
