@@ -229,6 +229,11 @@ main {
 }
 
 .search:focus {border-color:var(--blue)}
+.sort-controls {display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin:0 0 12px;color:var(--muted);font-size:12px}
+.sort-button {border:1px solid var(--border);background:#0b1727;color:var(--muted);padding:8px 10px;border-radius:8px;font-size:12px;transition:.2s}
+.sort-button:hover {border-color:var(--blue);color:white}
+.sort-button.active {background:#164b7d;border-color:#2679bd;color:white}
+
 
 .vehicles {
   max-height:465px;
@@ -554,6 +559,12 @@ id="search"
 placeholder="Szukaj linii, pojazdu..."
 >
 
+<div class="sort-controls" role="group" aria-label="Sortowanie pojazdów">
+  <span>Sortuj:</span>
+  <button type="button" class="sort-button active" data-sort="line" data-sort-group="map">Według linii</button>
+  <button type="button" class="sort-button" data-sort="fleet" data-sort-group="map">Według nr taborowego</button>
+</div>
+
 <div class="vehicles" id="vehicleList">
 <div class="empty">Pobieranie danych...</div>
 </div>
@@ -619,6 +630,12 @@ class="search"
 id="search2"
 placeholder="Wyszukaj linię, numer lub kierunek..."
 >
+
+<div class="sort-controls" role="group" aria-label="Sortowanie pojazdów">
+  <span>Sortuj:</span>
+  <button type="button" class="sort-button active" data-sort="line" data-sort-group="all">Według linii</button>
+  <button type="button" class="sort-button" data-sort="fleet" data-sort-group="all">Według nr taborowego</button>
+</div>
 
 <div class="vehicles" id="vehicleList2">
 <div class="empty">Pobieranie danych...</div>
@@ -748,6 +765,7 @@ const $ = id => document.getElementById(id);
 let vehicles = [];
 let markers = {};
 let selectedVehicle = null;
+let vehicleSortMode = "line";
 let map = null;
 let mapReady = false;
 let vehicleDatabase = new Map();
@@ -1173,13 +1191,18 @@ String(x ?? "").toLowerCase().includes(query)
 
 );
 
-// Stała kolejność: najpierw numer linii (naturalnie, np. 2, 3, 10, 117, 210),
-// następnie kierunek i numer pojazdu. Działa identycznie w obu widokach listy.
-filtered.sort((a,b)=>
-  String(a.routeShortName ?? "").localeCompare(String(b.routeShortName ?? ""), "pl", {numeric:true,sensitivity:"base"}) ||
-  String(a.headsign ?? "").localeCompare(String(b.headsign ?? ""), "pl", {numeric:true,sensitivity:"base"}) ||
-  String(a.vehicleCode ?? getId(a)).localeCompare(String(b.vehicleCode ?? getId(b)), "pl", {numeric:true,sensitivity:"base"})
-);
+// Sortowanie zależne od wybranego przełącznika.
+const compareText=(x,y)=>String(x ?? "").localeCompare(String(y ?? ""), "pl", {numeric:true,sensitivity:"base"});
+filtered.sort((a,b)=>{
+  if(vehicleSortMode==="fleet") {
+    return compareText(a.vehicleCode ?? getId(a), b.vehicleCode ?? getId(b)) ||
+      compareText(a.routeShortName,b.routeShortName) ||
+      compareText(a.headsign,b.headsign);
+  }
+  return compareText(a.routeShortName,b.routeShortName) ||
+    compareText(a.headsign,b.headsign) ||
+    compareText(a.vehicleCode ?? getId(a),b.vehicleCode ?? getId(b));
+});
 
 $(countId).textContent =
 filtered.length+" wyników";
@@ -1590,6 +1613,19 @@ $("dutyDate").addEventListener("change",()=>{
 $("search").addEventListener("input",renderVehicles);
 
 $("search2").addEventListener("input",renderVehicles);
+document.querySelectorAll(".sort-button").forEach(button=>{
+  button.addEventListener("click",()=>{
+    vehicleSortMode=button.dataset.sort;
+    document.querySelectorAll(".sort-button").forEach(item=>{
+      const active=item.dataset.sort===vehicleSortMode;
+      item.classList.toggle("active",active);
+      item.setAttribute("aria-pressed",String(active));
+    });
+    renderVehicles();
+  });
+  button.setAttribute("aria-pressed",String(button.dataset.sort===vehicleSortMode));
+});
+
 
 /* START */
 
