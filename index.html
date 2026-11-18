@@ -359,6 +359,17 @@ main {
 .duty-detail-panel {margin-top:18px}
 .duty-trip {padding:15px 17px;border-bottom:1px solid var(--border)}
 .duty-trip:last-child {border-bottom:0}
+.duty-trip-collapsible > summary {list-style:none;cursor:pointer}
+.duty-trip-collapsible > summary::-webkit-details-marker {display:none}
+.duty-trip-collapsible[open] > summary {border-bottom:1px solid var(--border)}
+.duty-trip-collapsible .duty-stop {min-height:28px}
+.duty-detail-panel {overflow:hidden}
+@media(max-width:600px) {
+  .duty-trip-head {align-items:flex-start;flex-direction:column;gap:5px}
+  .duty-trip {padding:12px 10px}
+  .duty-stop {grid-template-columns:62px minmax(0,1fr);overflow-wrap:anywhere}
+  .duty-line-button,.duty-task-button {min-height:46px}
+}
 .duty-trip-head {display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:10px}
 .duty-trip-head strong {font-size:14px}
 .duty-trip-head span {font-size:12px;color:var(--muted)}
@@ -744,8 +755,10 @@ let vehicleDatabaseLoaded = false;
 let vehicleDatabaseUpdated = null;
 const VEHICLE_DATABASE_URL = "https://files.cloudgdansk.pl/d/otwarte-dane/ztm/baza-pojazdow.json?v=2";
 const GTFS_URL = "https://ckan.multimediagdansk.pl/dataset/c24aa637-3619-4dc2-a171-a23eec8f2172/resource/30e783e4-2bec-4a7d-bb22-ee3e3b26ca96/download/gtfsgoogle.zip";
-let gtfs = {routes:[],trips:[],stopTimes:[],stops:[],calendar:[],calendarDates:[]};
+let gtfs = {routes:[],trips:[],stops:[],calendar:[],calendarDates:[]};
+let gtfsStopTimesFile = null;
 let gtfsLoaded = false;
+let gtfsStopTimesLoading = false;
 let expandedDutyRoute = null;
 let selectedDutyKey = null;
 
@@ -1312,12 +1325,13 @@ async function loadGtfs() {
       const file=zip.file(name);
       return file ? parseGtfsCsv(await file.async("string")) : [];
     };
-    const [routes,trips,stopTimes,stops,calendar,calendarDates]=await Promise.all([
-      read("routes.txt"),read("trips.txt"),read("stop_times.txt"),
-      read("stops.txt"),read("calendar.txt"),read("calendar_dates.txt")
+    const [routes,trips,stops,calendar,calendarDates]=await Promise.all([
+      read("routes.txt"),read("trips.txt"),read("stops.txt"),
+      read("calendar.txt"),read("calendar_dates.txt")
     ]);
-    if (!routes.length || !trips.length || !stopTimes.length) throw new Error("Brak wymaganych plików routes.txt, trips.txt lub stop_times.txt");
-    gtfs={routes,trips,stopTimes,stops,calendar,calendarDates};
+    gtfsStopTimesFile=zip.file("stop_times.txt");
+    if (!routes.length || !trips.length || !gtfsStopTimesFile) throw new Error("Brak wymaganych plików GTFS");
+    gtfs={routes,trips,stops,calendar,calendarDates};
     gtfsLoaded=true;
     status.textContent=routes.length+" linii · "+trips.length+" kursów w pliku GTFS";
     renderDutyLines();
@@ -1389,45 +1403,102 @@ function renderDutyLines() {
   });
 }
 
-function showDutySchedule(route,duty,trips) {
+async function showDutySchedule(route,duty,trips) {
   selectedDutyKey=route.route_id+"::"+duty;
-  const stopMap=new Map(gtfs.stops.map(stop=>[stop.stop_id,stop]));
-  const tripMap=new Map(gtfs.trips.map(trip=>[trip.trip_id,trip]));
-  const timeMap=new Map();
-  gtfs.stopTimes.forEach(st=>{
-    if (!timeMap.has(st.trip_id)) timeMap.set(st.trip_id,[]);
-    timeMap.get(st.trip_id).push(st);
-  });
-  const ordered=[...trips].sort((a,b)=>{
-    const ta=(timeMap.get(a.trip_id)||[]).sort((x,y)=>Number(x.stop_sequence)-Number(y.stop_sequence))[0]?.departure_time || "99:99:99";
-    const tb=(timeMap.get(b.trip_id)||[]).sort((x,y)=>Number(x.stop_sequence)-Number(y.stop_sequence))[0]?.departure_time || "99:99:99";
-    return ta.localeCompare(tb);
-  });
+  const host=$("dutyDetail");
   $("dutyDetailTitle").textContent="Linia "+(route.route_short_name||route.route_id)+" · brygada "+duty;
-  $("dutyDetailMeta").textContent=ordered.length+" kursów · "+$("dutyDate").value;
-  const host=$("dutyDetail"); host.replaceChildren();
-  ordered.forEach((trip,index)=>{
-    const stops=(timeMap.get(trip.trip_id)||[]).sort((a,b)=>Number(a.stop_sequence)-Number(b.stop_sequence));
-    const section=document.createElement("div"); section.className="duty-trip";
-    const head=document.createElement("div"); head.className="duty-trip-head";
-    const title=document.createElement("strong"); title.textContent="Kurs "+(index+1);
-    const first=stops[0],last=stops[stops.length-1];
-    const span=document.createElement("span");
-    span.textContent=(first?.departure_time||first?.arrival_time||"—")+" – "+(last?.arrival_time||last?.departure_time||"—");
-    head.append(title,span); section.append(head);
-    stops.forEach(st=>{
-      const row=document.createElement("div"); row.className="duty-stop";
-      const time=document.createElement("span"); time.className="duty-stop-time";
-      time.textContent=st.departure_time||st.arrival_time||"—";
-      const stop=document.createElement("span"); stop.className="duty-stop-name";
-      stop.textContent=stopMap.get(st.stop_id)?.stop_name||st.stop_id;
-      row.append(time,stop); section.append(row);
-    });
-    host.append(section);
-  });
-  if (!ordered.length) host.innerHTML='<div class="duty-empty">Brak szczegółów kursów dla tej brygady.</div>';
-  $("dutyDetailPanel").scrollIntoView({behavior:"smooth",block:"start"});
+  $("dutyDetailMeta").textContent=trips.length+" kursów · "+$("dutyDate").value;
+  host.innerHTML='<div class="duty-empty">Wczytywanie rozkładu wybranej brygady…</div>';
   renderDutyLines();
+
+  try {
+    if (!gtfsStopTimesFile) throw new Error("Brak pliku czasów przystanków");
+    if (gtfsStopTimesLoading) throw new Error("Trwa już wczytywanie innego rozkładu");
+    gtfsStopTimesLoading=true;
+
+    // Przetwarzamy CSV wiersz po wierszu i zapamiętujemy tylko kursy
+    // należące do wybranej brygady, zamiast budować mapę całego GTFS.
+    const wanted=new Set(trips.map(t=>t.trip_id));
+    const tripStops=new Map();
+    const csv=await gtfsStopTimesFile.async("string");
+    const headerEnd=csv.indexOf("\n");
+    if(headerEnd<0) throw new Error("Nieprawidłowy plik stop_times.txt");
+    const headers=csv.slice(0,headerEnd).replace(/\r$/,"").split(",");
+    const indexes={
+      trip_id:headers.indexOf("trip_id"),
+      arrival_time:headers.indexOf("arrival_time"),
+      departure_time:headers.indexOf("departure_time"),
+      stop_id:headers.indexOf("stop_id"),
+      stop_sequence:headers.indexOf("stop_sequence")
+    };
+    if(Object.values(indexes).some(i=>i<0)) throw new Error("Brak wymaganych kolumn stop_times.txt");
+
+    let pos=headerEnd+1, newline;
+    while((newline=csv.indexOf("\n",pos))!==-1) {
+      const line=csv.slice(pos,newline).replace(/\r$/,"");
+      pos=newline+1;
+      if(!line) continue;
+      // Pola stop_times.txt używane poniżej nie zawierają przecinków ani cudzysłowów.
+      const cols=line.split(",");
+      const tripId=cols[indexes.trip_id];
+      if(!wanted.has(tripId)) continue;
+      if(!tripStops.has(tripId)) tripStops.set(tripId,[]);
+      tripStops.get(tripId).push({
+        arrival_time:cols[indexes.arrival_time],
+        departure_time:cols[indexes.departure_time],
+        stop_id:cols[indexes.stop_id],
+        stop_sequence:Number(cols[indexes.stop_sequence])
+      });
+    }
+    gtfsStopTimesLoading=false;
+
+    const stopMap=new Map(gtfs.stops.map(stop=>[stop.stop_id,stop]));
+    const ordered=[...trips].sort((a,b)=>{
+      const ta=(tripStops.get(a.trip_id)||[])[0]?.departure_time || "99:99:99";
+      const tb=(tripStops.get(b.trip_id)||[])[0]?.departure_time || "99:99:99";
+      return ta.localeCompare(tb);
+    });
+
+    host.replaceChildren();
+    ordered.forEach((trip,index)=>{
+      const stops=(tripStops.get(trip.trip_id)||[]).sort((a,b)=>a.stop_sequence-b.stop_sequence);
+      const section=document.createElement("details");
+      section.className="duty-trip duty-trip-collapsible";
+      const summary=document.createElement("summary");
+      summary.className="duty-trip-head";
+      const title=document.createElement("strong");
+      title.textContent="Kurs "+(index+1);
+      const span=document.createElement("span");
+      const first=stops[0],last=stops[stops.length-1];
+      span.textContent=(first?.departure_time||first?.arrival_time||"—")+" – "+(last?.arrival_time||last?.departure_time||"—")+" · "+stops.length+" przystanków";
+      summary.append(title,span);
+      section.append(summary);
+
+      // Przystanki tworzymy dopiero po rozwinięciu pojedynczego kursu.
+      let rendered=false;
+      section.addEventListener("toggle",()=>{
+        if(!section.open || rendered) return;
+        rendered=true;
+        const fragment=document.createDocumentFragment();
+        stops.forEach(st=>{
+          const row=document.createElement("div"); row.className="duty-stop";
+          const time=document.createElement("span"); time.className="duty-stop-time";
+          time.textContent=st.departure_time||st.arrival_time||"—";
+          const stop=document.createElement("span"); stop.className="duty-stop-name";
+          stop.textContent=stopMap.get(st.stop_id)?.stop_name||st.stop_id;
+          row.append(time,stop); fragment.append(row);
+        });
+        section.append(fragment);
+      });
+      host.append(section);
+    });
+    if(!ordered.length) host.innerHTML='<div class="duty-empty">Brak kursów dla wybranej brygady.</div>';
+    $("dutyDetailPanel").scrollIntoView({behavior:"smooth",block:"start"});
+  } catch(error) {
+    gtfsStopTimesLoading=false;
+    console.error("Błąd rozkładu brygadowego:",error);
+    host.innerHTML='<div class="duty-empty">Nie udało się wczytać rozkładu tej brygady: '+String(error.message||error)+'</div>';
+  }
 }
 
 /* NAWIGACJA */
