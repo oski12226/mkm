@@ -1623,71 +1623,70 @@ function clearVehicleSelection() {
   $("details").textContent="Wybierz pojazd z listy lub mapy.";
   renderVehicles();
 }
-async function selectVehicle(id) {
+function selectVehicle(id) {
+  const v = vehicles.find(x => getId(x) === String(id));
+  if (!v) return;
 
-const v = vehicles.find(x=>getId(x)===id);
+  selectedVehicle = String(id);
+  renderedListKeys.clear();
+  const token = ++selectedVehicleToken;
+  const pos = getPosition(v);
 
-if (!v) return;
+  // Najpierw pokaż szczegóły — nie czekaj na wolne skanowanie GTFS na telefonie.
+  const fields = [
+    ["Linia", v.routeShortName],
+    ["Kierunek", v.headsign ?? v.destination ?? v.direction ?? "—"],
+    ["Typ pojazdu", getVehicleType(v)],
+    ["Przewoźnik", getVehicleOperator(v)],
+    ["Numer taborowy", v.vehicleCode ?? v.vehicleId],
+    ["Marka / model", getVehicleRecord(v) ? [getVehicleRecord(v).brand, getVehicleRecord(v).model].filter(Boolean).join(" ") : "—"],
+    ["Rok produkcji", getVehicleRecord(v)?.productionYear ?? "—"],
+    ["Brygada", v.vehicleService],
+    ["Prędkość", (v.speed ?? "—") + " km/h"],
+    ["Opóźnienie", delayLabel(v)],
+    ["Rozpoczęcie kursu", formatTime(v.scheduledTripStartTime)],
+    ["Ostatnia aktualizacja", formatTime(v.generated)]
+  ];
 
-selectedVehicle = id;
-renderedListKeys.clear();
-const token=++selectedVehicleToken;
-const pos = getPosition(v);
-const trip=gtfsLoaded ? await findVehicleTripForSchedule(v) : null;
-if(token!==selectedVehicleToken || selectedVehicle!==id) return;
-if (pos && mapReady) {
-  await showVehicleRoute(v,trip);
-  if(token!==selectedVehicleToken || selectedVehicle!==id) return;
-  // Wycentruj pojazd, zachowując dokładnie aktualny poziom przybliżenia.
-  map.panTo(pos,{animate:true,duration:.35});
+  const container = document.createElement("div");
+  container.className = "details";
+  fields.forEach(([name, value]) => {
+    const box = document.createElement("div");
+    box.className = "detail";
+    const label = document.createElement("small");
+    label.textContent = name;
+    const val = document.createElement("strong");
+    val.textContent = value ?? "—";
+    box.append(label, val);
+    container.appendChild(box);
+  });
+
+  const nextStops = document.createElement("section");
+  nextStops.className = "vehicle-next-stops";
+  nextStops.innerHTML = '<h4>📍 Następne przystanki</h4><div class="vehicle-next-note">Wczytywanie rozkładu…</div>';
+  container.append(nextStops);
+  $("details").replaceChildren(container);
+  renderVehicles();
+
+  if (pos && mapReady) {
+    // Centruj bez zmiany poziomu przybliżenia; nie blokuj panelu szczegółów.
+    map.panTo(pos, { animate: false });
+  }
+
+  // Dopasowanie kursu i rysowanie trasy odbywa się w tle.
+  (async () => {
+    try {
+      const trip = gtfsLoaded ? await findVehicleTripForSchedule(v) : null;
+      if (token !== selectedVehicleToken || selectedVehicle !== String(id)) return;
+      if (pos && mapReady) await showVehicleRoute(v, trip);
+      if (token !== selectedVehicleToken || selectedVehicle !== String(id)) return;
+      renderVehicleNextStops(v, nextStops, trip, token);
+    } catch (error) {
+      if (token !== selectedVehicleToken) return;
+      nextStops.innerHTML = '<h4>📍 Następne przystanki</h4><div class="vehicle-next-note">Nie udało się wczytać kursu: ' + escapeHtml(error.message || error) + '</div>';
+    }
+  })();
 }
-
-const fields = [
-
-["Linia",v.routeShortName],
-["Kierunek",v.headsign ?? v.destination ?? v.direction ?? "—"],
-["Typ pojazdu",getVehicleType(v)],
-["Przewoźnik",getVehicleOperator(v)],
-["Numer taborowy",v.vehicleCode ?? v.vehicleId],
-["Marka / model",getVehicleRecord(v) ? [getVehicleRecord(v).brand,getVehicleRecord(v).model].filter(Boolean).join(" ") : "—"],
-["Rok produkcji",getVehicleRecord(v)?.productionYear ?? "—"],
-["Brygada",v.vehicleService],
-["Prędkość",(v.speed ?? "—")+" km/h"],
-["Opóźnienie",delayLabel(v)],
-["Rozpoczęcie kursu",formatTime(v.scheduledTripStartTime)],
-["Ostatnia aktualizacja",formatTime(v.generated)]
-
-];
-
-const container = document.createElement("div");
-container.className = "details";
-
-fields.forEach(([name,value])=>{
-
-const box = document.createElement("div");
-box.className = "detail";
-
-const label = document.createElement("small");
-label.textContent = name;
-
-const val = document.createElement("strong");
-val.textContent = value ?? "—";
-
-box.append(label,val);
-container.appendChild(box);
-
-});
-
-const nextStops=document.createElement("section");
-nextStops.className="vehicle-next-stops";
-nextStops.innerHTML='<h4>📍 Następne przystanki</h4><div class="vehicle-next-note">Wczytywanie rozkładu…</div>';
-container.append(nextStops);
-$("details").replaceChildren(container);
-renderVehicleNextStops(v,nextStops,trip,token);
-renderVehicles();
-
-}
-
 /* ROZKŁADY BRYGADOWE GTFS */
 
 function parseGtfsCsv(csv) {
