@@ -1412,18 +1412,57 @@ async function findVehicleTripForSchedule(v) {
   return best;
 }
 
-function showVehicleRoute(v,trip) {
+function routeBearing(a,b) {
+  const rad=Math.PI/180, y=Math.sin((b[1]-a[1])*rad)*Math.cos(b[0]*rad);
+  const x=Math.cos(a[0]*rad)*Math.sin(b[0]*rad)-Math.sin(a[0]*rad)*Math.cos(b[0]*rad)*Math.cos((b[1]-a[1])*rad);
+  return (Math.atan2(y,x)*180/Math.PI+360)%360;
+}
+
+async function showVehicleRoute(v,trip) {
   clearSelectedRoute();
-  if(!mapReady || !gtfsLoaded || !trip?.shape_id) return false;
-  const points=gtfsShapes.get(trip.shape_id);
-  if(!points || points.length<2) return false;
-  const coordinates=points.map(point=>point.position);
-  const casing=L.polyline(coordinates,{color:"#ffffff",weight:9,opacity:.95,lineCap:"round",lineJoin:"round",interactive:false});
-  const route=L.polyline(coordinates,{color:"#245bff",weight:5,opacity:1,lineCap:"round",lineJoin:"round",interactive:false});
-  selectedRouteLayer=L.layerGroup([casing,route]).addTo(map);
+  if(!mapReady || !gtfsLoaded || !trip) return false;
+  let coordinates=[];
+  const points=trip.shape_id ? gtfsShapes.get(trip.shape_id) : null;
+  if(points?.length>1) coordinates=points.map(point=>point.position);
+  // Awaryjnie odtwórz przebieg kursu z kolejności przystanków, gdy GTFS nie ma geometrii shape.
+  if(coordinates.length<2 && gtfsStopTimesFile) {
+    const byTrip=await getGtfsStopTimesByTrip();
+    const stopMap=new Map(gtfs.stops.map(stop=>[stop.stop_id,stop]));
+    coordinates=(byTrip.get(trip.trip_id)||[])
+      .sort((a,b)=>Number(a.stop_sequence)-Number(b.stop_sequence))
+      .map(row=>stopMap.get(row.stop_id))
+      .filter(stop=>stop && Number.isFinite(Number(stop.stop_lat)) && Number.isFinite(Number(stop.stop_lon)))
+      .map(stop=>[Number(stop.stop_lat),Number(stop.stop_lon)]);
+  }
+  if(coordinates.length<2) return false;
+  // Zachowaj szczegóły przebiegu, ale ogranicz liczbę punktów dla płynnego renderowania.
+  if(coordinates.length>2200) {
+    const step=Math.ceil(coordinates.length/2200);
+    coordinates=coordinates.filter((point,index)=>index%step===0 || index===coordinates.length-1);
+  }
+  const casing=L.polyline(coordinates,{color:"#071426",weight:12,opacity:.9,lineCap:"round",lineJoin:"round",interactive:false});
+  const route=L.polyline(coordinates,{color:"#00a6ff",weight:7,opacity:1,lineCap:"round",lineJoin:"round",dashArray:null,interactive:false});
+  const layers=[casing,route];
+  // Strzałki są zwrócone zgodnie z kolejnością shape_pt_sequence w GTFS.
+  const arrowCount=Math.min(7,Math.max(2,Math.floor(coordinates.length/35)));
+  for(let n=1;n<=arrowCount;n++) {
+    const index=Math.min(coordinates.length-1,Math.floor(n*(coordinates.length-1)/(arrowCount+1)));
+    const prev=coordinates[Math.max(0,index-1)], next=coordinates[Math.min(coordinates.length-1,index+1)];
+    const bearing=routeBearing(prev,next);
+    const icon=L.divIcon({
+      className:"vehicle-route-arrow-icon",
+      html:'<div style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;transform:rotate('+bearing+'deg);filter:drop-shadow(0 1px 2px #001)"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 2 L21 21 L12 16 L3 21 Z" fill="#ffffff" stroke="#075985" stroke-width="1.7" stroke-linejoin="round"/></svg></div>',
+      iconSize:[24,24],iconAnchor:[12,12]
+    });
+    layers.push(L.marker(coordinates[index],{icon,interactive:false,keyboard:false,zIndexOffset:1800}));
+  }
+  selectedRouteLayer=L.layerGroup(layers).addTo(map);
   const id=getId(v);
-  if(markers[id]) markers[id].setZIndexOffset(1000);
-  map.fitBounds(route.getBounds(),{padding:[35,35],maxZoom:15});
+  if(markers[id]) markers[id].setZIndexOffset(2200);
+  const bounds=route.getBounds();
+  const pos=getPosition(v);
+  if(pos) bounds.extend(pos);
+  map.fitBounds(bounds,{padding:[55,55],maxZoom:16});
   return true;
 }
 
@@ -1508,7 +1547,7 @@ const pos = getPosition(v);
 const trip=gtfsLoaded ? await findVehicleTripForSchedule(v) : null;
 if(token!==selectedVehicleToken || selectedVehicle!==id) return;
 if (pos && mapReady) {
-  if (!showVehicleRoute(v,trip)) map.setView(pos,15);
+  if (!(await showVehicleRoute(v,trip))) map.setView(pos,15);
   if (markers[id]) markers[id].openPopup();
 }
 
