@@ -1344,6 +1344,10 @@ function clearSelectedRoute() {
   selectedRouteLayer=null;
 }
 
+function normalizeDirection(value) {
+  return String(value ?? "").normalize("NFD").replace(/[\\u0300-\\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+}
+
 function findVehicleTrip(v) {
   if(!gtfsLoaded || !gtfs.trips.length) return null;
   const tripId=String(v.tripId ?? v.trip_id ?? v.tripID ?? v.trip?.tripId ?? v.trip?.trip_id ?? "").trim();
@@ -1351,19 +1355,62 @@ function findVehicleTrip(v) {
     const exact=gtfs.trips.find(t=>t.trip_id===tripId);
     if(exact) return exact;
   }
-
   const routeName=String(v.routeShortName ?? "").trim().toLowerCase();
-  const headsign=String(v.headsign ?? v.destination ?? "").trim().toLowerCase();
-  if(!routeName || !headsign) return null;
-  const routeIds=new Set(gtfs.routes
-    .filter(r=>String(r.route_short_name ?? "").trim().toLowerCase()===routeName)
-    .map(r=>r.route_id));
-  const matches=gtfs.trips.filter(t=>
-    routeIds.has(t.route_id) &&
-    String(t.trip_headsign ?? "").trim().toLowerCase()===headsign &&
-    t.shape_id && gtfsShapes.has(t.shape_id)
-  );
+  const headsign=normalizeDirection(v.headsign ?? v.destination ?? v.direction);
+  if(!routeName) return null;
+  const routeIds=new Set(gtfs.routes.filter(r=>String(r.route_short_name ?? "").trim().toLowerCase()===routeName).map(r=>r.route_id));
+  let matches=gtfs.trips.filter(t=>routeIds.has(t.route_id) && t.shape_id && gtfsShapes.has(t.shape_id));
+  if(headsign) {
+    const directed=matches.filter(t=>normalizeDirection(t.trip_headsign)===headsign);
+    if(directed.length) matches=directed;
+  }
   return matches.length===1 ? matches[0] : null;
+}
+
+async function findVehicleTripForSchedule(v) {
+  const direct=findVehicleTrip(v);
+  if(direct) return direct;
+  if(!gtfsLoaded || !gtfsStopTimesFile) return null;
+  const routeName=String(v.routeShortName ?? "").trim().toLowerCase();
+  const headsign=normalizeDirection(v.headsign ?? v.destination ?? v.direction);
+  if(!routeName) return null;
+  const routeIds=new Set(gtfs.routes.filter(r=>String(r.route_short_name ?? "").trim().toLowerCase()===routeName).map(r=>r.route_id));
+  let candidates=gtfs.trips.filter(t=>routeIds.has(t.route_id));
+  if(headsign) {
+    const directed=candidates.filter(t=>normalizeDirection(t.trip_headsign)===headsign);
+    if(directed.length) candidates=directed;
+  }
+  if(!candidates.length) return null;
+  const active=activeGtfsServices(new Date().toLocaleDateString("en-CA"));
+  candidates=candidates.filter(t=>active.has(t.service_id));
+  if(!candidates.length) return null;
+  if(candidates.length===1) return candidates[0];
+  if(!window.__vehicleTripTimes) {
+    const parsed=parseGtfsCsv(await gtfsStopTimesFile.async("string"));
+    const byTrip=new Map();
+    parsed.forEach(row=>{
+      if(!byTrip.has(row.trip_id)) byTrip.set(row.trip_id,[]);
+      byTrip.get(row.trip_id).push(row);
+    });
+    byTrip.forEach(rows=>rows.sort((a,b)=>Number(a.stop_sequence)-Number(b.stop_sequence)));
+    window.__vehicleTripTimes=byTrip;
+  }
+  const now=new Date(), nowSec=now.getHours()*3600+now.getMinutes()*60+now.getSeconds();
+  const scheduled=v.scheduledTripStartTime ? new Date(v.scheduledTripStartTime) : null;
+  const scheduledSec=scheduled&&!isNaN(scheduled.getTime()) ? scheduled.getHours()*3600+scheduled.getMinutes()*60 : null;
+  let best=null,bestScore=Infinity;
+  candidates.forEach(trip=>{
+    const rows=window.__vehicleTripTimes.get(trip.trip_id)||[];
+    if(!rows.length) return;
+    const first=gtfsTimeSeconds(rows[0].departure_time||rows[0].arrival_time);
+    const last=gtfsTimeSeconds(rows[rows.length-1].arrival_time||rows[rows.length-1].departure_time);
+    let score;
+    if(scheduledSec!==null) score=Math.abs(first-scheduledSec);
+    else if(nowSec>=first-60 && nowSec<=last+300) score=0;
+    else score=Math.min(Math.abs(nowSec-first),Math.abs(nowSec-last))+100000;
+    if(score<bestScore) {bestScore=score;best=trip;}
+  });
+  return best;
 }
 
 function showVehicleRoute(v) {
@@ -1382,31 +1429,22 @@ function showVehicleRoute(v) {
   return true;
 }
 
-async function renderVehicleNextStops(v,host) {
-  const trip=findVehicleTrip(v);
-  if(!gtfsLoaded || !gtfsStopTimesFile || !trip) {
-    host.innerHTML='<h4>📍 Następne przystanki</h4><div class="vehicle-next-note">Brak danych kursu do ustalenia kolejnych przystanków.</div>';
-    return;
-  }
+async async function renderVehicleNextStops(v,host) {
+  host.innerHTML='<h4>📍 Następne przystanki</h4><div class="vehicle-next-note">Wyszukiwanie kursu…</div>';
   try {
-    const csv=await gtfsStopTimesFile.async("string");
-    const end=csv.indexOf("\n");
-    if(end<0) throw new Error("Nieprawidłowy rozkład GTFS");
-    const headers=csv.slice(0,end).replace(/\r$/,"").split(",");
-    const ix={trip:headers.indexOf("trip_id"),arrival:headers.indexOf("arrival_time"),departure:headers.indexOf("departure_time"),stop:headers.indexOf("stop_id"),seq:headers.indexOf("stop_sequence")};
-    if(Object.values(ix).some(i=>i<0)) throw new Error("Brak kolumn przystanków w GTFS");
-    const rows=[], stopMap=new Map(gtfs.stops.map(st=>[st.stop_id,st]));
-    let pos=end+1,nl;
-    while((nl=csv.indexOf("\n",pos))!==-1) {
-      const cols=csv.slice(pos,nl).replace(/\r$/,"").split(","); pos=nl+1;
-      if(cols[ix.trip]!==trip.trip_id) continue;
-      rows.push({arrival:cols[ix.arrival],departure:cols[ix.departure],stop:cols[ix.stop],seq:Number(cols[ix.seq])});
+    const trip=await findVehicleTripForSchedule(v);
+    if(!gtfsLoaded || !gtfsStopTimesFile || !trip) {
+      host.innerHTML='<h4>📍 Następne przystanki</h4><div class="vehicle-next-note">Nie udało się dopasować kursu do pojazdu. Kierunek pojazdu: '+escapeHtml(v.headsign||v.destination||"nieznany")+'.</div>';
+      return;
     }
-    rows.sort((a,b)=>a.seq-b.seq);
+    const csv=await gtfsStopTimesFile.async("string");
+    const parsed=parseGtfsCsv(csv);
+    const rows=parsed.filter(row=>row.trip_id===trip.trip_id).sort((a,b)=>Number(a.stop_sequence)-Number(b.stop_sequence));
+    const stopMap=new Map(gtfs.stops.map(st=>[st.stop_id,st]));
     const now=new Date(), nowSec=now.getHours()*3600+now.getMinutes()*60+now.getSeconds();
     const delay=Number(v.delay)||0;
     const upcoming=rows.map(row=>{
-      const raw=row.arrival||row.departure;
+      const raw=row.arrival_time||row.departure_time;
       return {...row,estimated:gtfsTimeSeconds(raw)+delay};
     }).filter(row=>row.estimated>=nowSec-30).slice(0,6);
     host.innerHTML='<h4>📍 Następne przystanki</h4>';
@@ -1414,16 +1452,17 @@ async function renderVehicleNextStops(v,host) {
       const note=document.createElement("div"); note.className="vehicle-next-note"; note.textContent="Brak kolejnych przystanków w bieżącym kursie."; host.append(note); return;
     }
     upcoming.forEach(row=>{
-      const stop=stopMap.get(row.stop), eta=row.estimated;
+      const stop=stopMap.get(row.stop_id), eta=row.estimated;
       const minutes=Math.max(0,Math.ceil((eta-nowSec)/60));
       const timeText=String(Math.floor((eta%86400)/3600)).padStart(2,"0")+":"+String(Math.floor((eta%3600)/60)).padStart(2,"0");
       const line=document.createElement("div"); line.className="vehicle-next-row";
       const time=document.createElement("span"); time.className="vehicle-next-time"; time.textContent=timeText;
-      const name=document.createElement("span"); name.className="vehicle-next-name"; name.textContent=stop?.stop_name||row.stop;
+      const name=document.createElement("span"); name.className="vehicle-next-name"; name.textContent=stop?.stop_name||row.stop_id;
       const countdown=document.createElement("span"); countdown.className="vehicle-next-count"; countdown.textContent=minutes===0?"za chwilę":"za "+minutes+" min";
       line.append(time,name,countdown); host.append(line);
     });
-    const note=document.createElement("div"); note.className="vehicle-next-note"; note.textContent="Godziny z GTFS skorygowane o aktualne opóźnienie pojazdu."; host.append(note);
+    const note=document.createElement("div"); note.className="vehicle-next-note"; note.textContent="Kierunek: "+(trip.trip_headsign||v.headsign||"—")+". Godziny GTFS skorygowane o opóźnienie pojazdu.";
+    host.append(note);
   } catch(error) {
     host.innerHTML='<h4>📍 Następne przystanki</h4><div class="vehicle-next-note">Nie udało się odczytać rozkładu: '+escapeHtml(error.message)+'</div>';
   }
@@ -1449,6 +1488,7 @@ if (pos && mapReady) {
 const fields = [
 
 ["Linia",v.routeShortName],
+["Kierunek",v.headsign ?? v.destination ?? v.direction ?? "—"],
 ["Typ pojazdu",getVehicleType(v)],
 ["Przewoźnik",getVehicleOperator(v)],
 ["Numer taborowy",v.vehicleCode ?? v.vehicleId],
