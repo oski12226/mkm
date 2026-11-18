@@ -1039,6 +1039,9 @@ if (!pos || !id) return;
 active.add(id);
 
 const vehicleType = getVehicleType(v);
+const routeLabel = String(v.routeShortName ?? "?").replace(/[&<>"']/g, ch => ({
+  "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+})[ch]);
 const icon = L.divIcon({
 
 className:"",
@@ -1047,26 +1050,28 @@ html:`
 <div style="
 background:${vehicleType === "Tramwaj" ? "#d97706" : vehicleType === "Autobus zastępczy" ? "#dc465c" : "#168cff"};
 border:2px solid white;
-width:36px;
-height:36px;
+width:46px;
+height:46px;
 box-sizing:border-box;
 border-radius:50%;
 display:flex;
+flex-direction:column;
 align-items:center;
 justify-content:center;
+gap:1px;
 overflow:hidden;
 white-space:nowrap;
 line-height:1;
 box-shadow:0 3px 12px #0008;
-font-size:17px;
-font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif;
+font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",Arial,sans-serif;
 ">
-${vehicleType === "Tramwaj" ? "🚋" : "🚌"}
+<span style="font-size:17px;line-height:18px">${vehicleType === "Tramwaj" ? "🚋" : "🚌"}</span>
+<span style="font-size:11px;font-weight:900;line-height:12px;color:white;text-shadow:0 1px 2px #000">${routeLabel}</span>
 </div>
 `,
 
-iconSize:[36,36],
-iconAnchor:[18,18]
+iconSize:[46,46],
+iconAnchor:[23,23]
 
 });
 
@@ -1083,6 +1088,7 @@ selectVehicle(id);
 } else {
 
 markers[id].setLatLng(pos);
+markers[id].setIcon(icon);
 
 }
 
