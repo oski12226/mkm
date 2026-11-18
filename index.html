@@ -1414,25 +1414,41 @@ async function findVehicleTripForSchedule(v) {
     const directed=candidates.filter(t=>normalizeDirection(t.trip_headsign)===headsign);
     if(directed.length) candidates=directed;
   }
-  if(!candidates.length) return null;
   const active=activeGtfsServices(new Date().toLocaleDateString("en-CA"));
   candidates=candidates.filter(t=>active.has(t.service_id));
   if(!candidates.length) return null;
   if(candidates.length===1) return candidates[0];
-  // Przy niejednoznacznym dopasowaniu nie indeksuj całego pliku stop_times.
-  // Bez jednoznacznego kursu bezpieczniej pokazać brak danych niż zgadywać.
-  if(candidates.length!==1) return null;
-  return candidates[0];
-  const byTrip=await getGtfsStopTimesByTrip();
+
+  // Wybierz kurs skanując stop_times w locie: zapamiętuj tylko pierwszy i ostatni czas
+  // dla kandydatów tej linii, zamiast tworzyć wielki indeks wszystkich kursów.
+  const csv=await gtfsStopTimesFile.async("string");
+  const end=csv.indexOf("\n");
+  if(end<0) return null;
+  const headers=csv.slice(0,end).replace(/\r$/,"").split(",");
+  const ix={trip:headers.indexOf("trip_id"),arrival:headers.indexOf("arrival_time"),departure:headers.indexOf("departure_time"),sequence:headers.indexOf("stop_sequence")};
+  if(Object.values(ix).some(x=>x<0)) return null;
+  const candidateIds=new Set(candidates.map(t=>t.trip_id)), bounds=new Map();
+  let pos=end+1,nl;
+  while((nl=csv.indexOf("\n",pos))!==-1) {
+    const cols=csv.slice(pos,nl).replace(/\r$/,"").split(","); pos=nl+1;
+    const id=cols[ix.trip];
+    if(!candidateIds.has(id)) continue;
+    const seq=Number(cols[ix.sequence])||0;
+    const arrival=cols[ix.arrival], departure=cols[ix.departure];
+    const time=departure||arrival;
+    if(!time) continue;
+    let item=bounds.get(id);
+    if(!item) bounds.set(id,item={firstSeq:seq,first:time,lastSeq:seq,last:arrival||departure});
+    if(seq<item.firstSeq) {item.firstSeq=seq;item.first=departure||arrival;}
+    if(seq>=item.lastSeq) {item.lastSeq=seq;item.last=arrival||departure;}
+  }
   const now=new Date(), nowSec=now.getHours()*3600+now.getMinutes()*60+now.getSeconds();
   const scheduled=v.scheduledTripStartTime ? new Date(v.scheduledTripStartTime) : null;
   const scheduledSec=scheduled&&!isNaN(scheduled.getTime()) ? scheduled.getHours()*3600+scheduled.getMinutes()*60 : null;
   let best=null,bestScore=Infinity;
   candidates.forEach(trip=>{
-    const rows=byTrip.get(trip.trip_id)||[];
-    if(!rows.length) return;
-    const first=gtfsTimeSeconds(rows[0].departure_time||rows[0].arrival_time);
-    const last=gtfsTimeSeconds(rows[rows.length-1].arrival_time||rows[rows.length-1].departure_time);
+    const item=bounds.get(trip.trip_id); if(!item) return;
+    const first=gtfsTimeSeconds(item.first), last=gtfsTimeSeconds(item.last);
     let score;
     if(scheduledSec!==null) score=Math.abs(first-scheduledSec);
     else if(nowSec>=first-60 && nowSec<=last+300) score=0;
