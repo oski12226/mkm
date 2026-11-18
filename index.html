@@ -1419,6 +1419,10 @@ async function findVehicleTripForSchedule(v) {
   candidates=candidates.filter(t=>active.has(t.service_id));
   if(!candidates.length) return null;
   if(candidates.length===1) return candidates[0];
+  // Przy niejednoznacznym dopasowaniu nie indeksuj całego pliku stop_times.
+  // Bez jednoznacznego kursu bezpieczniej pokazać brak danych niż zgadywać.
+  if(candidates.length!==1) return null;
+  return candidates[0];
   const byTrip=await getGtfsStopTimesByTrip();
   const now=new Date(), nowSec=now.getHours()*3600+now.getMinutes()*60+now.getSeconds();
   const scheduled=v.scheduledTripStartTime ? new Date(v.scheduledTripStartTime) : null;
@@ -1509,25 +1513,23 @@ async function showVehicleRoute(v,trip) {
   return true; // Nie zmieniaj poziomu zoomu ani widoku mapy tutaj.
 }
 
-async function getGtfsStopTimesByTrip() {
-  if(gtfsStopTimesByTrip) return gtfsStopTimesByTrip;
-  if(!gtfsStopTimesIndexPromise) {
-    gtfsStopTimesIndexPromise=(async()=>{
-      if(!gtfsStopTimesFile) throw new Error("Brak pliku stop_times.txt");
-      const parsed=parseGtfsCsv(await gtfsStopTimesFile.async("string"));
-      const index=new Map();
-      parsed.forEach(row=>{
-        if(!row.trip_id) return;
-        if(!index.has(row.trip_id)) index.set(row.trip_id,[]);
-        index.get(row.trip_id).push(row);
-      });
-      index.forEach(rows=>rows.sort((a,b)=>Number(a.stop_sequence)-Number(b.stop_sequence)));
-      gtfsStopTimesByTrip=index;
-      return index;
-    })();
+async function getGtfsStopTimesForTrip(tripId) {
+  if(!gtfsStopTimesFile) throw new Error("Brak pliku stop_times.txt");
+  // Nie twórz mapy setek tysięcy kursów. Pobierz tylko wiersze aktualnie wybranego kursu.
+  const csv=await gtfsStopTimesFile.async("string");
+  const end=csv.indexOf("\n");
+  if(end<0) throw new Error("Nieprawidłowy plik stop_times.txt");
+  const headers=csv.slice(0,end).replace(/\r$/,"").split(",");
+  const ix={trip:headers.indexOf("trip_id"),arrival:headers.indexOf("arrival_time"),departure:headers.indexOf("departure_time"),stop:headers.indexOf("stop_id"),sequence:headers.indexOf("stop_sequence")};
+  if(Object.values(ix).some(x=>x<0)) throw new Error("Brak wymaganych kolumn stop_times.txt");
+  const rows=[]; let pos=end+1,nl;
+  while((nl=csv.indexOf("\n",pos))!==-1) {
+    const cols=csv.slice(pos,nl).replace(/\r$/,"").split(","); pos=nl+1;
+    if(cols[ix.trip]!==tripId) continue;
+    rows.push({trip_id:tripId,arrival_time:cols[ix.arrival],departure_time:cols[ix.departure],stop_id:cols[ix.stop],stop_sequence:Number(cols[ix.sequence])||0});
   }
-  try { return await gtfsStopTimesIndexPromise; }
-  catch(error) { gtfsStopTimesIndexPromise=null; throw error; }
+  rows.sort((x,y)=>x.stop_sequence-y.stop_sequence);
+  return rows;
 }
 
 async function renderVehicleNextStops(v,host,trip,token) {
@@ -1539,9 +1541,8 @@ async function renderVehicleNextStops(v,host,trip,token) {
       host.innerHTML='<h4>📍 Następne przystanki</h4><div class="vehicle-next-note">Nie udało się dopasować aktywnego kursu. Sprawdź kierunek lub identyfikator kursu w danych pojazdu.</div>';
       return;
     }
-    const byTrip=await getGtfsStopTimesByTrip();
+    const rows=await getGtfsStopTimesForTrip(trip.trip_id);
     if(token!==undefined && token!==selectedVehicleToken) return;
-    const rows=byTrip.get(trip.trip_id)||[];
     const stopMap=gtfsStopsById||(gtfsStopsById=new Map(gtfs.stops.map(st=>[st.stop_id,st])));
     const now=new Date(), nowSec=now.getHours()*3600+now.getMinutes()*60+now.getSeconds();
     const delay=Number(v.delay)||0;
