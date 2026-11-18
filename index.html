@@ -1209,19 +1209,18 @@ async function getStopDepartures(stopId) {
     const active=activeGtfsServices(new Date().toLocaleDateString("en-CA"));
     const trips=new Map(gtfs.trips.filter(t=>active.has(t.service_id)).map(t=>[t.trip_id,t]));
     const routes=new Map(gtfs.routes.map(r=>[r.route_id,r]));
-    const csv=await gtfsStopTimesFile.async("string"), end=csv.indexOf("\n");
-    const headers=csv.slice(0,end).replace(/\r$/,"").split(",");
-    const ix={trip:headers.indexOf("trip_id"),arrival:headers.indexOf("arrival_time"),departure:headers.indexOf("departure_time"),stop:headers.indexOf("stop_id")};
-    if(Object.values(ix).some(n=>n<0)) throw new Error("Nieprawidłowy plik odjazdów");
     const found=[];
-    let pos=end+1,nl;
-    while((nl=csv.indexOf("\n",pos))!==-1) {
-      const cols=csv.slice(pos,nl).replace(/\r$/,"").split(","); pos=nl+1;
-      if(cols[ix.stop]!==stopId) continue;
-      const trip=trips.get(cols[ix.trip]); if(!trip) continue;
-      const time=cols[ix.departure]||cols[ix.arrival]; if(!time) continue;
+    let ix=null;
+    await scanGtfsStopTimes((cols,headers)=>{
+      if(!ix) {
+        ix={trip:headers.indexOf("trip_id"),arrival:headers.indexOf("arrival_time"),departure:headers.indexOf("departure_time"),stop:headers.indexOf("stop_id")};
+        if(Object.values(ix).some(n=>n<0)) throw new Error("Nieprawidłowy plik odjazdów");
+      }
+      if(cols[ix.stop]!==stopId) return;
+      const trip=trips.get(cols[ix.trip]); if(!trip) return;
+      const time=cols[ix.departure]||cols[ix.arrival]; if(!time) return;
       found.push({time,route:routes.get(trip.route_id)?.route_short_name||trip.route_id,headsign:trip.trip_headsign||""});
-    }
+    });
     const secondsNow=(()=>{const d=new Date();return d.getHours()*3600+d.getMinutes()*60+d.getSeconds();})();
     found.sort((a,b)=>a.time.localeCompare(b.time));
     const upcoming=found.filter(x=>gtfsTimeSeconds(x.time)>=secondsNow-60).slice(0,8);
@@ -1493,6 +1492,41 @@ async function showVehicleRoute(v,trip) {
   const id=getId(v);
   if(markers[id]) markers[id].setZIndexOffset(2200);
   return true; // Nie zmieniaj poziomu zoomu ani widoku mapy tutaj.
+}
+
+// Czyta rozpakowany plik ZIP porcjami, bez tworzenia jednego wielkiego stringa.
+async function scanGtfsStopTimes(onRow) {
+  if(!gtfsStopTimesFile) throw new Error("Brak pliku stop_times.txt");
+  return new Promise((resolve,reject)=>{
+    let buffer="",headers=null,settled=false;
+    const stream=gtfsStopTimesFile.internalStream("string");
+    const finishError=e=>{if(settled)return;settled=true;reject(e);};
+    stream.on("data",chunk=>{
+      if(settled)return;
+      buffer+=chunk;
+      let nl;
+      while((nl=buffer.indexOf("\n"))!==-1) {
+        const line=buffer.slice(0,nl).replace(/\r$/,"");
+        buffer=buffer.slice(nl+1);
+        if(!headers) {headers=line.split(",");continue;}
+        if(!line)continue;
+        try {onRow(line.split(","),headers);} catch(e) {stream.pause();finishError(e);return;}
+      }
+    });
+    stream.on("error",finishError);
+    stream.on("end",()=>{
+      if(settled)return;
+      try {
+        if(buffer) {
+          const line=buffer.replace(/\r$/,"");
+          if(!headers) headers=line.split(",");
+          else if(line) onRow(line.split(","),headers);
+        }
+        settled=true;resolve(headers||[]);
+      } catch(e) {finishError(e);}
+    });
+    stream.resume();
+  });
 }
 
 async function getGtfsStopTimesForTrip(tripId) {
