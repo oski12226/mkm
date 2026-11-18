@@ -244,6 +244,13 @@ main {
 #stopSearchResults:not(:empty) {margin-top:6px;border:1px solid var(--border);border-radius:9px;background:var(--panel);overflow:hidden;box-shadow:0 5px 16px #0005}
 #map {border-radius:0 0 14px 14px;overflow:hidden;clip-path:inset(0 round 0 0 14px 14px);}
 .stop-marker {width:15px;height:15px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#f4c542;border:1px solid #fff;color:#172033;font-size:7px;font-weight:900;box-shadow:0 1px 4px #0008}
+.vehicle-next-stops {margin-top:14px;padding-top:12px;border-top:1px solid var(--border)}
+.vehicle-next-stops h4 {margin:0 0 9px;font-size:13px}
+.vehicle-next-row {display:grid;grid-template-columns:54px minmax(0,1fr) auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px}
+.vehicle-next-time {font-weight:800;color:#9fcaff;font-variant-numeric:tabular-nums}
+.vehicle-next-name {min-width:0;overflow-wrap:anywhere}
+.vehicle-next-count {color:var(--muted);white-space:nowrap;font-size:11px}
+.vehicle-next-note {font-size:12px;color:var(--muted);padding:5px 0}
 .stop-popup-title {font-weight:800;font-size:14px;margin-bottom:7px}
 .stop-departures {max-height:220px;overflow:auto;min-width:210px}
 .stop-departure {display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-top:1px solid #34445b;font-size:12px}
@@ -1375,6 +1382,53 @@ function showVehicleRoute(v) {
   return true;
 }
 
+async function renderVehicleNextStops(v,host) {
+  const trip=findVehicleTrip(v);
+  if(!gtfsLoaded || !gtfsStopTimesFile || !trip) {
+    host.innerHTML='<h4>📍 Następne przystanki</h4><div class="vehicle-next-note">Brak danych kursu do ustalenia kolejnych przystanków.</div>';
+    return;
+  }
+  try {
+    const csv=await gtfsStopTimesFile.async("string");
+    const end=csv.indexOf("\n");
+    if(end<0) throw new Error("Nieprawidłowy rozkład GTFS");
+    const headers=csv.slice(0,end).replace(/\r$/,"").split(",");
+    const ix={trip:headers.indexOf("trip_id"),arrival:headers.indexOf("arrival_time"),departure:headers.indexOf("departure_time"),stop:headers.indexOf("stop_id"),seq:headers.indexOf("stop_sequence")};
+    if(Object.values(ix).some(i=>i<0)) throw new Error("Brak kolumn przystanków w GTFS");
+    const rows=[], stopMap=new Map(gtfs.stops.map(st=>[st.stop_id,st]));
+    let pos=end+1,nl;
+    while((nl=csv.indexOf("\n",pos))!==-1) {
+      const cols=csv.slice(pos,nl).replace(/\r$/,"").split(","); pos=nl+1;
+      if(cols[ix.trip]!==trip.trip_id) continue;
+      rows.push({arrival:cols[ix.arrival],departure:cols[ix.departure],stop:cols[ix.stop],seq:Number(cols[ix.seq])});
+    }
+    rows.sort((a,b)=>a.seq-b.seq);
+    const now=new Date(), nowSec=now.getHours()*3600+now.getMinutes()*60+now.getSeconds();
+    const delay=Number(v.delay)||0;
+    const upcoming=rows.map(row=>{
+      const raw=row.arrival||row.departure;
+      return {...row,estimated:gtfsTimeSeconds(raw)+delay};
+    }).filter(row=>row.estimated>=nowSec-30).slice(0,6);
+    host.innerHTML='<h4>📍 Następne przystanki</h4>';
+    if(!upcoming.length) {
+      const note=document.createElement("div"); note.className="vehicle-next-note"; note.textContent="Brak kolejnych przystanków w bieżącym kursie."; host.append(note); return;
+    }
+    upcoming.forEach(row=>{
+      const stop=stopMap.get(row.stop), eta=row.estimated;
+      const minutes=Math.max(0,Math.ceil((eta-nowSec)/60));
+      const timeText=String(Math.floor((eta%86400)/3600)).padStart(2,"0")+":"+String(Math.floor((eta%3600)/60)).padStart(2,"0");
+      const line=document.createElement("div"); line.className="vehicle-next-row";
+      const time=document.createElement("span"); time.className="vehicle-next-time"; time.textContent=timeText;
+      const name=document.createElement("span"); name.className="vehicle-next-name"; name.textContent=stop?.stop_name||row.stop;
+      const countdown=document.createElement("span"); countdown.className="vehicle-next-count"; countdown.textContent=minutes===0?"za chwilę":"za "+minutes+" min";
+      line.append(time,name,countdown); host.append(line);
+    });
+    const note=document.createElement("div"); note.className="vehicle-next-note"; note.textContent="Godziny z GTFS skorygowane o aktualne opóźnienie pojazdu."; host.append(note);
+  } catch(error) {
+    host.innerHTML='<h4>📍 Następne przystanki</h4><div class="vehicle-next-note">Nie udało się odczytać rozkładu: '+escapeHtml(error.message)+'</div>';
+  }
+}
+
 /* SZCZEGÓŁY */
 
 function selectVehicle(id) {
@@ -1397,7 +1451,7 @@ const fields = [
 ["Linia",v.routeShortName],
 ["Typ pojazdu",getVehicleType(v)],
 ["Przewoźnik",getVehicleOperator(v)],
-["Numer pojazdu",v.vehicleCode ?? v.vehicleId],
+["Numer taborowy",v.vehicleCode ?? v.vehicleId],
 ["Marka / model",getVehicleRecord(v) ? [getVehicleRecord(v).brand,getVehicleRecord(v).model].filter(Boolean).join(" ") : "—"],
 ["Rok produkcji",getVehicleRecord(v)?.productionYear ?? "—"],
 ["Brygada",v.vehicleService],
@@ -1427,8 +1481,12 @@ container.appendChild(box);
 
 });
 
+const nextStops=document.createElement("section");
+nextStops.className="vehicle-next-stops";
+nextStops.innerHTML='<h4>📍 Następne przystanki</h4><div class="vehicle-next-note">Wczytywanie rozkładu…</div>';
+container.append(nextStops);
 $("details").replaceChildren(container);
-
+renderVehicleNextStops(v,nextStops);
 renderVehicles();
 
 }
