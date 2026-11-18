@@ -1429,7 +1429,7 @@ function showVehicleRoute(v) {
   return true;
 }
 
-async async function renderVehicleNextStops(v,host) {
+async function renderVehicleNextStops(v,host) {
   host.innerHTML='<h4>📍 Następne przystanki</h4><div class="vehicle-next-note">Wyszukiwanie kursu…</div>';
   try {
     const trip=await findVehicleTripForSchedule(v);
