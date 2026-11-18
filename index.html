@@ -236,8 +236,13 @@ main {
 }
 
 .search:focus {border-color:var(--blue)}
-.stop-search-wrap {padding:10px 13px 0;background:var(--panel)}
-.stop-search-wrap .search {margin:0}
+.content > .panel:first-child {overflow:hidden;border-radius:15px;isolation:isolate}
+.stop-search-wrap {padding:9px 10px;background:var(--panel);box-sizing:border-box;position:relative;z-index:500}
+.stop-search-wrap .search {display:block;width:100%;box-sizing:border-box;margin:0;border-radius:10px;padding:11px 13px;min-height:40px}
+#stopSearchResults {position:relative;z-index:1000;max-height:220px;overflow-y:auto}
+#stopSearchResults:empty {display:none}
+#stopSearchResults:not(:empty) {margin-top:6px;border:1px solid var(--border);border-radius:9px;background:var(--panel);overflow:hidden;box-shadow:0 5px 16px #0005}
+#map {border-radius:0 0 14px 14px;overflow:hidden;clip-path:inset(0 round 0 0 14px 14px);}
 .stop-marker {width:15px;height:15px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#f4c542;border:1px solid #fff;color:#172033;font-size:7px;font-weight:900;box-shadow:0 1px 4px #0008}
 .stop-popup-title {font-weight:800;font-size:14px;margin-bottom:7px}
 .stop-departures {max-height:220px;overflow:auto;min-width:210px}
