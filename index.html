@@ -199,8 +199,15 @@ main {
 
 /* MAP */
 
+.content > .panel:first-child {
+  display:flex;
+  flex-direction:column;
+}
+
 #map {
-  height:530px;
+  flex:1;
+  min-height:530px;
+  height:auto;
   width:100%;
   background:#122238;
 }
