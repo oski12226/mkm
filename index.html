@@ -1445,18 +1445,29 @@ async function showVehicleRoute(v,trip) {
   const casing=L.polyline(coordinates,{color:"#071426",weight:12,opacity:.9,lineCap:"round",lineJoin:"round",interactive:false});
   const route=L.polyline(coordinates,{color:"#00a6ff",weight:7,opacity:1,lineCap:"round",lineJoin:"round",dashArray:null,interactive:false});
   const layers=[casing,route];
-  // Strzałki są zwrócone zgodnie z kolejnością shape_pt_sequence w GTFS.
-  const arrowCount=Math.min(7,Math.max(2,Math.floor(coordinates.length/35)));
-  for(let n=1;n<=arrowCount;n++) {
-    const index=Math.min(coordinates.length-1,Math.floor(n*(coordinates.length-1)/(arrowCount+1)));
-    const prev=coordinates[Math.max(0,index-1)], next=coordinates[Math.min(coordinates.length-1,index+1)];
-    const bearing=routeBearing(prev,next);
-    const icon=L.divIcon({
-      className:"vehicle-route-arrow-icon",
-      html:'<div style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;transform:rotate('+bearing+'deg);filter:drop-shadow(0 1px 2px #001)"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 2 L21 21 L12 16 L3 21 Z" fill="#ffffff" stroke="#075985" stroke-width="1.7" stroke-linejoin="round"/></svg></div>',
-      iconSize:[24,24],iconAnchor:[12,12]
-    });
-    layers.push(L.marker(coordinates[index],{icon,interactive:false,keyboard:false,zIndexOffset:1800}));
+  // Rozstaw strzałek co ok. 35 px ekranu (w zakresie 20–50 px),
+  // niezależnie od liczby punktów zapisanych w GTFS.
+  const arrowSpacingPx=35;
+  const projected=coordinates.map(point=>map.latLngToLayerPoint(point));
+  let distanceToNextArrow=arrowSpacingPx;
+  for(let i=1;i<projected.length;i++) {
+    const a=projected[i-1], b=projected[i];
+    const dx=b.x-a.x, dy=b.y-a.y;
+    const segmentLength=Math.hypot(dx,dy);
+    if(segmentLength<0.5) continue;
+    while(distanceToNextArrow<=segmentLength) {
+      const t=distanceToNextArrow/segmentLength;
+      const arrowPoint=L.point(a.x+dx*t,a.y+dy*t);
+      const bearing=(Math.atan2(dx,-dy)*180/Math.PI+360)%360;
+      const icon=L.divIcon({
+        className:"vehicle-route-arrow-icon",
+        html:'<div style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;transform:rotate('+bearing+'deg);filter:drop-shadow(0 1px 2px #001)"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M12 2 L21 21 L12 16 L3 21 Z" fill="#ffffff" stroke="#075985" stroke-width="1.7" stroke-linejoin="round"/></svg></div>',
+        iconSize:[20,20],iconAnchor:[10,10]
+      });
+      layers.push(L.marker(map.layerPointToLatLng(arrowPoint),{icon,interactive:false,keyboard:false,zIndexOffset:1800}));
+      distanceToNextArrow+=arrowSpacingPx;
+    }
+    distanceToNextArrow-=segmentLength;
   }
   selectedRouteLayer=L.layerGroup(layers).addTo(map);
   const id=getId(v);
