@@ -1673,14 +1673,21 @@ function selectVehicle(id) {
     map.panTo(pos, { animate: false });
   }
 
-  // Dopasowanie kursu i rysowanie trasy odbywa się w tle.
+  // Najpierw narysuj trasę, jeśli identyfikator/kierunek jednoznacznie wskazuje kurs.
+  // Nie czekaj z trasą na skanowanie dużego stop_times.txt.
+  const directTrip = gtfsLoaded ? findVehicleTrip(v) : null;
+  if (directTrip && pos && mapReady) {
+    showVehicleRoute(v, directTrip).catch(error => console.warn("Nie udało się narysować trasy:", error));
+  }
+
+  // Dopasowanie dokładnego kursu i odjazdów wykonuj w tle.
   (async () => {
     try {
-      const trip = gtfsLoaded ? await findVehicleTripForSchedule(v) : null;
+      const trip = directTrip || (gtfsLoaded ? await findVehicleTripForSchedule(v) : null);
       if (token !== selectedVehicleToken || selectedVehicle !== String(id)) return;
-      if (pos && mapReady) await showVehicleRoute(v, trip);
+      if (pos && mapReady && trip && trip !== directTrip) await showVehicleRoute(v, trip);
       if (token !== selectedVehicleToken || selectedVehicle !== String(id)) return;
-      renderVehicleNextStops(v, nextStops, trip, token);
+      await renderVehicleNextStops(v, nextStops, trip, token);
     } catch (error) {
       if (token !== selectedVehicleToken) return;
       nextStops.innerHTML = '<h4>📍 Następne przystanki</h4><div class="vehicle-next-note">Nie udało się wczytać kursu: ' + escapeHtml(error.message || error) + '</div>';
