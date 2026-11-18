@@ -1403,25 +1403,49 @@ function findVehicleTrip(v) {
 async function findVehicleTripForSchedule(v) {
   const direct=findVehicleTrip(v);
   if(direct) return direct;
-  if(!gtfsLoaded) return null;
+  if(!gtfsLoaded || !gtfsStopTimesFile) return null;
   const routeName=String(v.routeShortName ?? "").trim().toLowerCase();
-  const headsign=normalizeDirection(v.headsign ?? v.destination ?? v.direction);
   if(!routeName) return null;
   const routeIds=new Set(gtfs.routes.filter(r=>String(r.route_short_name ?? "").trim().toLowerCase()===routeName).map(r=>r.route_id));
   let candidates=gtfs.trips.filter(t=>routeIds.has(t.route_id)&&t.shape_id&&gtfsShapes.has(t.shape_id));
+  if(!candidates.length) candidates=gtfs.trips.filter(t=>routeIds.has(t.route_id));
+  const headsign=normalizeDirection(v.headsign ?? v.destination ?? v.direction);
   if(headsign) {
-    const directed=candidates.filter(t=>normalizeDirection(t.trip_headsign)===headsign);
+    const directed=candidates.filter(t=>normalizeDirection(t.trip_headsign).includes(headsign)||headsign.includes(normalizeDirection(t.trip_headsign)));
     if(directed.length) candidates=directed;
   }
-  if(!candidates.length) return null;
   if(candidates.length===1) return candidates[0];
-  const scheduled=v.scheduledTripStartTime ? new Date(v.scheduledTripStartTime) : null;
-  const scheduledSec=scheduled&&!isNaN(scheduled.getTime()) ? scheduled.getHours()*3600+scheduled.getMinutes()*60 : null;
-  if(scheduledSec===null) return candidates[0];
-  // Start time is encoded in many feed trip IDs; use a matching candidate where available.
-  const timeText=String(v.scheduledTripStartTime||"").slice(11,16).replace(":","");
-  const byTime=candidates.find(t=>String(t.trip_id).includes(timeText));
-  return byTime||candidates[0];
+
+  // Ustal rzeczywisty kurs na podstawie godzin pierwszego i ostatniego przystanku.
+  // Skan strumieniowy przechowuje wyłącznie granice kursów z tej jednej linii.
+  const ids=new Set(candidates.map(t=>t.trip_id)), bounds=new Map();
+  let indexes=null;
+  await scanGtfsStopTimes((cols,headers)=>{
+    if(!indexes) {
+      indexes={trip:headers.indexOf("trip_id"),arrival:headers.indexOf("arrival_time"),departure:headers.indexOf("departure_time"),sequence:headers.indexOf("stop_sequence")};
+      if(Object.values(indexes).some(i=>i<0)) throw new Error("Brak kolumn czasu w stop_times.txt");
+    }
+    const id=cols[indexes.trip]; if(!ids.has(id)) return;
+    const seq=Number(cols[indexes.sequence])||0;
+    const time=cols[indexes.departure]||cols[indexes.arrival]; if(!time) return;
+    let x=bounds.get(id);
+    if(!x) bounds.set(id,x={firstSeq:seq,first:time,lastSeq:seq,last:time});
+    if(seq<x.firstSeq){x.firstSeq=seq;x.first=time;}
+    if(seq>=x.lastSeq){x.lastSeq=seq;x.last=time;}
+  });
+  const now=new Date(), nowSec=now.getHours()*3600+now.getMinutes()*60+now.getSeconds();
+  const scheduled=v.scheduledTripStartTime?new Date(v.scheduledTripStartTime):null;
+  const scheduledSec=scheduled&&!isNaN(scheduled.getTime())?scheduled.getHours()*3600+scheduled.getMinutes()*60:null;
+  let best=null,bestScore=Infinity;
+  for(const trip of candidates) {
+    const x=bounds.get(trip.trip_id); if(!x) continue;
+    const first=gtfsTimeSeconds(x.first),last=gtfsTimeSeconds(x.last);
+    const active=nowSec>=first-180&&nowSec<=last+600;
+    let score=active?0:Math.min(Math.abs(nowSec-first),Math.abs(nowSec-last))+10000;
+    if(scheduledSec!==null) score+=Math.abs(first-scheduledSec)*0.15;
+    if(score<bestScore){bestScore=score;best=trip;}
+  }
+  return best;
 }
 function routeBearing(a,b) {
   const rad=Math.PI/180, y=Math.sin((b[1]-a[1])*rad)*Math.cos(b[0]*rad);
@@ -1447,9 +1471,9 @@ async function showVehicleRoute(v,trip) {
   }
   // Awaryjnie odtwórz przebieg kursu z kolejności przystanków, gdy GTFS nie ma geometrii shape.
   if(coordinates.length<2 && gtfsStopTimesFile) {
-    const byTrip=await getGtfsStopTimesByTrip();
-    const stopMap=new Map(gtfs.stops.map(stop=>[stop.stop_id,stop]));
-    coordinates=(byTrip.get(trip.trip_id)||[])
+    const tripRows=await getGtfsStopTimesForTrip(trip.trip_id);
+    const stopMap=gtfsStopsById||(gtfsStopsById=new Map(gtfs.stops.map(stop=>[stop.stop_id,stop])));
+    coordinates=tripRows
       .sort((a,b)=>Number(a.stop_sequence)-Number(b.stop_sequence))
       .map(row=>stopMap.get(row.stop_id))
       .filter(stop=>stop && Number.isFinite(Number(stop.stop_lat)) && Number.isFinite(Number(stop.stop_lon)))
