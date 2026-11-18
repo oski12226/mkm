@@ -822,10 +822,11 @@ let gtfsStopTimesIndexPromise = null;
 let gtfsStopTimesByTrip = null;
 let gtfsStopsById = null;
 const routeCoordinatesCache = new Map();
+const MAX_ROUTE_CACHE = 8;
 let stopMarkers = new Map();
 let stopLayer = null;
-let stopTimesIndexPromise = null;
-let stopTimesIndex = new Map();
+const stopDepartureCache = new Map();
+let stopDepartureScanPromise = null;
 const APP_VERSION = "1.1.0";
 let gtfsStopTimesFile = null;
 let gtfsLoaded = false;
@@ -1199,10 +1200,12 @@ function searchStops() {
   });
   if(!matches.length) {const empty=document.createElement("div");empty.className="stop-result stop-muted";empty.textContent="Nie znaleziono przystanku.";host.append(empty);}
 }
-async function buildStopTimesIndex() {
-  if(stopTimesIndexPromise) return stopTimesIndexPromise;
-  stopTimesIndexPromise=(async()=>{
-    if(!gtfsStopTimesFile) throw new Error("Brak danych odjazdów GTFS");
+async function getStopDepartures(stopId) {
+  if(stopDepartureCache.has(stopId)) return stopDepartureCache.get(stopId);
+  if(!gtfsStopTimesFile) throw new Error("Brak danych odjazdów GTFS");
+  // Skanujemy plik tylko na żądanie i zapamiętujemy wyłącznie kilka najbliższych odjazdów.
+  if(stopDepartureScanPromise) await stopDepartureScanPromise;
+  const task=(async()=>{
     const active=activeGtfsServices(new Date().toLocaleDateString("en-CA"));
     const trips=new Map(gtfs.trips.filter(t=>active.has(t.service_id)).map(t=>[t.trip_id,t]));
     const routes=new Map(gtfs.routes.map(r=>[r.route_id,r]));
@@ -1210,18 +1213,24 @@ async function buildStopTimesIndex() {
     const headers=csv.slice(0,end).replace(/\r$/,"").split(",");
     const ix={trip:headers.indexOf("trip_id"),arrival:headers.indexOf("arrival_time"),departure:headers.indexOf("departure_time"),stop:headers.indexOf("stop_id")};
     if(Object.values(ix).some(n=>n<0)) throw new Error("Nieprawidłowy plik odjazdów");
+    const found=[];
     let pos=end+1,nl;
     while((nl=csv.indexOf("\n",pos))!==-1) {
       const cols=csv.slice(pos,nl).replace(/\r$/,"").split(","); pos=nl+1;
+      if(cols[ix.stop]!==stopId) continue;
       const trip=trips.get(cols[ix.trip]); if(!trip) continue;
-      const stopId=cols[ix.stop], time=cols[ix.departure]||cols[ix.arrival]; if(!stopId||!time) continue;
-      if(!stopTimesIndex.has(stopId)) stopTimesIndex.set(stopId,[]);
-      stopTimesIndex.get(stopId).push({time,route:routes.get(trip.route_id)?.route_short_name||trip.route_id,headsign:trip.trip_headsign||""});
+      const time=cols[ix.departure]||cols[ix.arrival]; if(!time) continue;
+      found.push({time,route:routes.get(trip.route_id)?.route_short_name||trip.route_id,headsign:trip.trip_headsign||""});
     }
-    stopTimesIndex.forEach(rows=>rows.sort((a,b)=>a.time.localeCompare(b.time)));
-    return stopTimesIndex;
+    const secondsNow=(()=>{const d=new Date();return d.getHours()*3600+d.getMinutes()*60+d.getSeconds();})();
+    found.sort((a,b)=>a.time.localeCompare(b.time));
+    const upcoming=found.filter(x=>gtfsTimeSeconds(x.time)>=secondsNow-60).slice(0,8);
+    stopDepartureCache.set(stopId,upcoming);
+    if(stopDepartureCache.size>20) stopDepartureCache.delete(stopDepartureCache.keys().next().value);
+    return upcoming;
   })();
-  return stopTimesIndexPromise;
+  stopDepartureScanPromise=task;
+  try { return await task; } finally { if(stopDepartureScanPromise===task) stopDepartureScanPromise=null; }
 }
 function gtfsTimeSeconds(value) {
   const p=String(value||"").split(":").map(Number);
@@ -1231,9 +1240,7 @@ async function showStopDepartures(stop,marker) {
   const title='<div class="stop-popup-title">'+escapeHtml(stop.stop_name||"Przystanek")+'</div>';
   marker.setPopupContent(title+'<div class="stop-muted">Wczytywanie odjazdów…</div>').openPopup();
   try {
-    await buildStopTimesIndex();
-    const now=new Date(), seconds=now.getHours()*3600+now.getMinutes()*60+now.getSeconds();
-    const rows=(stopTimesIndex.get(stop.stop_id)||[]).filter(x=>gtfsTimeSeconds(x.time)>=seconds-60).slice(0,8);
+    const rows=await getStopDepartures(stop.stop_id);
     const body=rows.length?rows.map(x=>'<div class="stop-departure"><strong>'+escapeHtml(x.time.slice(0,5))+' · '+escapeHtml(x.route)+'</strong><span>'+escapeHtml(x.headsign||"—")+'</span></div>').join(""):'<div class="stop-muted">Brak kolejnych odjazdów w dzisiejszym rozkładzie.</div>';
     marker.setPopupContent(title+'<div class="stop-departures">'+body+'</div><div class="stop-muted" style="margin-top:7px">Rozkład GTFS · dzisiaj</div>').openPopup();
   } catch(error) { marker.setPopupContent(title+'<div class="stop-muted">Nie udało się pobrać odjazdów: '+escapeHtml(error.message)+'</div>').openPopup(); }
@@ -1447,7 +1454,10 @@ async function showVehicleRoute(v,trip) {
     const points=shapeKey ? gtfsShapes.get(shapeKey) : null;
     if(points?.length>1) {
       coordinates=points.map(point=>point.position);
-      if(shapeKey) routeCoordinatesCache.set(shapeKey,coordinates);
+      if(shapeKey) {
+        routeCoordinatesCache.set(shapeKey,coordinates);
+        if(routeCoordinatesCache.size>MAX_ROUTE_CACHE) routeCoordinatesCache.delete(routeCoordinatesCache.keys().next().value);
+      }
     }
   }
   // Awaryjnie odtwórz przebieg kursu z kolejności przystanków, gdy GTFS nie ma geometrii shape.
@@ -1704,6 +1714,7 @@ async function loadGtfs() {
     ]);
     gtfsStopTimesFile=zip.file("stop_times.txt");
     gtfsStopTimesIndexPromise=null; gtfsStopTimesByTrip=null; gtfsStopsById=null;
+    stopDepartureCache.clear();
     if (!routes.length || !trips.length || !gtfsStopTimesFile) throw new Error("Brak wymaganych plików GTFS");
     gtfs={routes,trips,stops,calendar,calendarDates};
     gtfsShapes=new Map();
