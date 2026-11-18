@@ -188,6 +188,10 @@ main {
   margin:0;
   font-size:16px;
 }
+.details-close {margin-left:auto;width:30px;height:30px;flex:0 0 30px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);color:var(--text);font-size:20px;line-height:1;cursor:pointer;display:grid;place-items:center}
+.details-close:hover {background:#8b2d3b;color:#fff;border-color:#8b2d3b}
+.vehicle-next-stops {grid-column:1/-1;min-width:0}
+
 
 .panel-header small {color:var(--muted)}
 
@@ -579,6 +583,7 @@ main {
 
 <div class="panel-header">
 <h3>📊 Szczegóły pojazdu</h3>
+<button type="button" id="closeVehicleDetails" class="details-close" aria-label="Zamknij szczegóły pojazdu" title="Odznacz pojazd">×</button>
 </div>
 
 <div id="details" class="info">
@@ -808,6 +813,9 @@ const GTFS_URL = "https://ckan.multimediagdansk.pl/dataset/c24aa637-3619-4dc2-a1
 let gtfs = {routes:[],trips:[],stops:[],calendar:[],calendarDates:[]};
 let gtfsShapes = new Map();
 let selectedRouteLayer = null;
+let selectedVehicleToken = 0;
+let gtfsStopTimesIndexPromise = null;
+let gtfsStopTimesByTrip = null;
 let stopMarkers = new Map();
 let stopLayer = null;
 let stopTimesIndexPromise = null;
@@ -1385,22 +1393,13 @@ async function findVehicleTripForSchedule(v) {
   candidates=candidates.filter(t=>active.has(t.service_id));
   if(!candidates.length) return null;
   if(candidates.length===1) return candidates[0];
-  if(!window.__vehicleTripTimes) {
-    const parsed=parseGtfsCsv(await gtfsStopTimesFile.async("string"));
-    const byTrip=new Map();
-    parsed.forEach(row=>{
-      if(!byTrip.has(row.trip_id)) byTrip.set(row.trip_id,[]);
-      byTrip.get(row.trip_id).push(row);
-    });
-    byTrip.forEach(rows=>rows.sort((a,b)=>Number(a.stop_sequence)-Number(b.stop_sequence)));
-    window.__vehicleTripTimes=byTrip;
-  }
+  const byTrip=await getGtfsStopTimesByTrip();
   const now=new Date(), nowSec=now.getHours()*3600+now.getMinutes()*60+now.getSeconds();
   const scheduled=v.scheduledTripStartTime ? new Date(v.scheduledTripStartTime) : null;
   const scheduledSec=scheduled&&!isNaN(scheduled.getTime()) ? scheduled.getHours()*3600+scheduled.getMinutes()*60 : null;
   let best=null,bestScore=Infinity;
   candidates.forEach(trip=>{
-    const rows=window.__vehicleTripTimes.get(trip.trip_id)||[];
+    const rows=byTrip.get(trip.trip_id)||[];
     if(!rows.length) return;
     const first=gtfsTimeSeconds(rows[0].departure_time||rows[0].arrival_time);
     const last=gtfsTimeSeconds(rows[rows.length-1].arrival_time||rows[rows.length-1].departure_time);
@@ -1413,40 +1412,58 @@ async function findVehicleTripForSchedule(v) {
   return best;
 }
 
-function showVehicleRoute(v) {
+function showVehicleRoute(v,trip) {
   clearSelectedRoute();
-  if(!mapReady || !gtfsLoaded) return false;
-  const trip=findVehicleTrip(v);
-  if(!trip?.shape_id) return false;
+  if(!mapReady || !gtfsLoaded || !trip?.shape_id) return false;
   const points=gtfsShapes.get(trip.shape_id);
   if(!points || points.length<2) return false;
   const coordinates=points.map(point=>point.position);
-  const casing=L.polyline(coordinates,{color:"#ffffff",weight:9,opacity:.95,lineCap:"round",lineJoin:"round"});
-  const route=L.polyline(coordinates,{color:"#245bff",weight:5,opacity:1,lineCap:"round",lineJoin:"round"});
+  const casing=L.polyline(coordinates,{color:"#ffffff",weight:9,opacity:.95,lineCap:"round",lineJoin:"round",interactive:false});
+  const route=L.polyline(coordinates,{color:"#245bff",weight:5,opacity:1,lineCap:"round",lineJoin:"round",interactive:false});
   selectedRouteLayer=L.layerGroup([casing,route]).addTo(map);
-  if(markers[getId(v)]) markers[getId(v)].setZIndexOffset(1000);
+  const id=getId(v);
+  if(markers[id]) markers[id].setZIndexOffset(1000);
   map.fitBounds(route.getBounds(),{padding:[35,35],maxZoom:15});
   return true;
 }
 
-async function renderVehicleNextStops(v,host) {
-  host.innerHTML='<h4>📍 Następne przystanki</h4><div class="vehicle-next-note">Wyszukiwanie kursu…</div>';
+async function getGtfsStopTimesByTrip() {
+  if(gtfsStopTimesByTrip) return gtfsStopTimesByTrip;
+  if(!gtfsStopTimesIndexPromise) {
+    gtfsStopTimesIndexPromise=(async()=>{
+      if(!gtfsStopTimesFile) throw new Error("Brak pliku stop_times.txt");
+      const parsed=parseGtfsCsv(await gtfsStopTimesFile.async("string"));
+      const index=new Map();
+      parsed.forEach(row=>{
+        if(!row.trip_id) return;
+        if(!index.has(row.trip_id)) index.set(row.trip_id,[]);
+        index.get(row.trip_id).push(row);
+      });
+      index.forEach(rows=>rows.sort((a,b)=>Number(a.stop_sequence)-Number(b.stop_sequence)));
+      gtfsStopTimesByTrip=index;
+      return index;
+    })();
+  }
+  try { return await gtfsStopTimesIndexPromise; }
+  catch(error) { gtfsStopTimesIndexPromise=null; throw error; }
+}
+
+async function renderVehicleNextStops(v,host,trip,token) {
+  host.innerHTML='<h4>📍 Następne przystanki</h4><div class="vehicle-next-note">Wczytywanie rozkładu…</div>';
   try {
-    const trip=await findVehicleTripForSchedule(v);
+    if(!trip) trip=await findVehicleTripForSchedule(v);
+    if(token!==undefined && token!==selectedVehicleToken) return;
     if(!gtfsLoaded || !gtfsStopTimesFile || !trip) {
-      host.innerHTML='<h4>📍 Następne przystanki</h4><div class="vehicle-next-note">Nie udało się dopasować kursu do pojazdu. Kierunek pojazdu: '+escapeHtml(v.headsign||v.destination||"nieznany")+'.</div>';
+      host.innerHTML='<h4>📍 Następne przystanki</h4><div class="vehicle-next-note">Nie udało się dopasować aktywnego kursu. Sprawdź kierunek lub identyfikator kursu w danych pojazdu.</div>';
       return;
     }
-    const csv=await gtfsStopTimesFile.async("string");
-    const parsed=parseGtfsCsv(csv);
-    const rows=parsed.filter(row=>row.trip_id===trip.trip_id).sort((a,b)=>Number(a.stop_sequence)-Number(b.stop_sequence));
+    const byTrip=await getGtfsStopTimesByTrip();
+    if(token!==undefined && token!==selectedVehicleToken) return;
+    const rows=byTrip.get(trip.trip_id)||[];
     const stopMap=new Map(gtfs.stops.map(st=>[st.stop_id,st]));
     const now=new Date(), nowSec=now.getHours()*3600+now.getMinutes()*60+now.getSeconds();
     const delay=Number(v.delay)||0;
-    const upcoming=rows.map(row=>{
-      const raw=row.arrival_time||row.departure_time;
-      return {...row,estimated:gtfsTimeSeconds(raw)+delay};
-    }).filter(row=>row.estimated>=nowSec-30).slice(0,6);
+    const upcoming=rows.map(row=>({...row,estimated:gtfsTimeSeconds(row.arrival_time||row.departure_time)+delay})).filter(row=>row.estimated>=nowSec-30).slice(0,6);
     host.innerHTML='<h4>📍 Następne przystanki</h4>';
     if(!upcoming.length) {
       const note=document.createElement("div"); note.className="vehicle-next-note"; note.textContent="Brak kolejnych przystanków w bieżącym kursie."; host.append(note); return;
@@ -1461,27 +1478,37 @@ async function renderVehicleNextStops(v,host) {
       const countdown=document.createElement("span"); countdown.className="vehicle-next-count"; countdown.textContent=minutes===0?"za chwilę":"za "+minutes+" min";
       line.append(time,name,countdown); host.append(line);
     });
-    const note=document.createElement("div"); note.className="vehicle-next-note"; note.textContent="Kierunek: "+(trip.trip_headsign||v.headsign||"—")+". Godziny GTFS skorygowane o opóźnienie pojazdu.";
+    const note=document.createElement("div"); note.className="vehicle-next-note"; note.textContent="Kierunek: "+(trip.trip_headsign||v.headsign||"—")+". Rozkład GTFS skorygowany o opóźnienie pojazdu.";
     host.append(note);
   } catch(error) {
-    host.innerHTML='<h4>📍 Następne przystanki</h4><div class="vehicle-next-note">Nie udało się odczytać rozkładu: '+escapeHtml(error.message)+'</div>';
+    if(token!==undefined && token!==selectedVehicleToken) return;
+    host.innerHTML='<h4>📍 Następne przystanki</h4><div class="vehicle-next-note">Błąd odczytu rozkładu: '+escapeHtml(error.message)+'</div>';
   }
 }
 
 /* SZCZEGÓŁY */
 
-function selectVehicle(id) {
+function clearVehicleSelection() {
+  selectedVehicleToken++;
+  if(selectedVehicle && markers[selectedVehicle]) markers[selectedVehicle].setZIndexOffset(0);
+  selectedVehicle=null;
+  clearSelectedRoute();
+  $("details").textContent="Wybierz pojazd z listy lub mapy.";
+  renderVehicles();
+}
+async function selectVehicle(id) {
 
 const v = vehicles.find(x=>getId(x)===id);
 
 if (!v) return;
 
 selectedVehicle = id;
-
+const token=++selectedVehicleToken;
 const pos = getPosition(v);
-
+const trip=gtfsLoaded ? await findVehicleTripForSchedule(v) : null;
+if(token!==selectedVehicleToken || selectedVehicle!==id) return;
 if (pos && mapReady) {
-  if (!showVehicleRoute(v)) map.setView(pos,15);
+  if (!showVehicleRoute(v,trip)) map.setView(pos,15);
   if (markers[id]) markers[id].openPopup();
 }
 
@@ -1526,7 +1553,7 @@ nextStops.className="vehicle-next-stops";
 nextStops.innerHTML='<h4>📍 Następne przystanki</h4><div class="vehicle-next-note">Wczytywanie rozkładu…</div>';
 container.append(nextStops);
 $("details").replaceChildren(container);
-renderVehicleNextStops(v,nextStops);
+renderVehicleNextStops(v,nextStops,trip,token);
 renderVehicles();
 
 }
@@ -1600,6 +1627,7 @@ async function loadGtfs() {
       read("calendar.txt"),read("calendar_dates.txt"),read("shapes.txt")
     ]);
     gtfsStopTimesFile=zip.file("stop_times.txt");
+    gtfsStopTimesIndexPromise=null; gtfsStopTimesByTrip=null;
     if (!routes.length || !trips.length || !gtfsStopTimesFile) throw new Error("Brak wymaganych plików GTFS");
     gtfs={routes,trips,stops,calendar,calendarDates};
     gtfsShapes=new Map();
@@ -1879,6 +1907,7 @@ document.querySelectorAll(".sort-button").forEach(button=>{
 initMap();
 
 $("appVersion").textContent=APP_VERSION;
+$("closeVehicleDetails").addEventListener("click",clearVehicleSelection);
 $("dutyDate").value=new Date().toLocaleDateString("en-CA");
 loadGtfs();
 loadVehicleDatabase();
