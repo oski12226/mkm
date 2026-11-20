@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#111326">
+<title>DUREX CATCHER — Misja Tusk</title>
+<style>
+:root{color-scheme:dark;--pink:#ff4f9a;--cyan:#55e6ff;--gold:#ffd45a}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;font-family:Inter,system-ui,Segoe UI,Arial,sans-serif;background:#0b0d1b;color:#fff}
+body{display:grid;place-items:center;padding:14px;overflow-x:hidden;background:radial-gradient(ellipse at 50% 0%,#30204d 0,#15172c 42%,#090b16 100%)}
+.shell{width:min(100%,920px)}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 0 12px}
+.logo{font-weight:1000;letter-spacing:.08em;font-size:clamp(19px,4vw,30px);line-height:1}
+.logo span{color:var(--pink);text-shadow:0 0 18px #ff4f9a88}
+.tag{font-size:11px;color:#b8bad0;letter-spacing:.14em;text-transform:uppercase;text-align:right}
+.panel{background:#171a31;border:1px solid #ffffff18;border-radius:22px;padding:12px;box-shadow:0 18px 60px #0008}
+.hud{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
+.stat{background:#0d1022;border:1px solid #ffffff12;border-radius:13px;padding:8px 10px;min-width:0}
+.stat small{display:block;color:#9da2c0;font-size:10px;text-transform:uppercase;letter-spacing:.12em}
+.stat b{display:block;font-size:clamp(17px,3.5vw,24px);font-variant-numeric:tabular-nums}
+#score{color:var(--cyan)}#lives{color:#ff7b9f}#level{color:var(--gold)}
+.stage{position:relative;overflow:hidden;border-radius:16px;background:#11152a;border:1px solid #ffffff20;touch-action:none}
+canvas{display:block;width:100%;height:auto;aspect-ratio:16/9;touch-action:none}
+.overlay{position:absolute;inset:0;display:grid;place-items:center;padding:18px;background:#090b18d9;backdrop-filter:blur(7px);text-align:center}
+.overlay.hidden{display:none}
+.modal{width:min(100%,440px)}
+.modal h1{font-size:clamp(27px,6vw,48px);line-height:.98;margin:0 0 10px;font-weight:1000;letter-spacing:-.04em}
+.modal h1 em{font-style:normal;color:var(--pink)}
+.modal p{color:#c4c7dc;line-height:1.5;margin:8px 0 18px;font-size:14px}
+button{border:0;border-radius:13px;padding:13px 22px;font-weight:900;font-size:15px;color:#151326;background:linear-gradient(135deg,#ff78b5,#ffcf6a);box-shadow:0 7px 24px #ff4f9a44;cursor:pointer}
+button:active{transform:scale(.97)}
+.secondary{background:#292d4b;color:#fff;box-shadow:none;margin-left:7px}
+.hint{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:#9da2c0;font-size:11px;padding:10px 3px 0}
+.hint strong{color:#e7e8f5}
+.credit{font-size:10px;color:#747995;text-align:center;margin:10px 0 0}
+.credit a{color:#aeb4d8}
+@media(max-width:560px){body{padding:8px}.panel{padding:8px;border-radius:17px}.hud{gap:5px}.stat{padding:7px 6px}.stat small{font-size:9px}.hint{font-size:10px}.tag{font-size:9px}}
+</style>
+</head>
+<body>
+<main class="shell">
+<header><div class="logo">DUREX <span>CATCHER</span></div><div class="tag">MINI GRA • MISJA TUSK</div></header>
+<section class="panel">
+<div class="hud">
+ <div class="stat"><small>Punkty</small><b id="score">0</b></div>
+ <div class="stat"><small>Rekord</small><b id="best">0</b></div>
+ <div class="stat"><small>Życia</small><b id="lives">❤️❤️❤️</b></div>
+ <div class="stat"><small>Poziom</small><b id="level">1</b></div>
+</div>
+<div class="stage" id="stage">
+<canvas id="game" width="960" height="540" aria-label="Gra Durex Catcher"></canvas>
+<div class="overlay" id="overlay"><div class="modal">
+<h1>ŁAP <em>DUREXY!</em></h1>
+<p>Donald czeka na dostawę. Zbieraj spadające paczki, unikaj wpadek i nie pozwól, żeby sytuacja wymknęła się spod kontroli.</p>
+<p>⬅️ ➡️ Sterowanie: A/D, strzałki lub przeciąganie palcem po ekranie.</p>
+<button id="start">ODPALAMY 🚀</button>
+</div></div>
+</div>
+<div class="hint"><span>🎮 <strong>A/D</strong> lub <strong>← →</strong> • telefon: przeciągaj palcem</span><span>⏸ <strong>Spacja</strong> — pauza</span></div>
+</section>
+<div class="credit">Portret: Gov.pl, Wikimedia Commons • CC BY 3.0 PL • <a href="https://commons.wikimedia.org/wiki/File:Official_portrait_of_Donald_Tusk.png" target="_blank" rel="noreferrer">źródło zdjęcia</a> • Gra satyryczna</div>
+</main>
+<script>
+(()=>{
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d'),stage=document.getElementById('stage');
+const $=id=>document.getElementById(id),W=960,H=540;
+const tusk=new Image();tusk.crossOrigin='anonymous';tusk.src='https://commons.wikimedia.org/wiki/Special:FilePath/Official_portrait_of_Donald_Tusk.png';
+let best=+(localStorage.getItem('durexCatcherBest')||0),score=0,lives=3,level=1,running=false,paused=false,last=0,spawn=0,items=[],particles=[],keys={},pointer=false,player={x:W/2,y:H-82,w:104,h:112,speed:590},shake=0;
+$('best').textContent=best;
+function rounded(x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r)}
+function bg(t){let g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#20264a');g.addColorStop(1,'#111329');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+ for(let i=0;i<65;i++){let x=(i*173)%W,y=((i*97+t*.012)%H);ctx.fillStyle=i%3?'#ffffff20':'#65eaff33';ctx.fillRect(x,y,2,2)}
+ ctx.fillStyle='#ffffff08';for(let x=0;x<W;x+=80){ctx.fillRect(x,0,1,H)}
+ ctx.fillStyle='#ff4f9a';ctx.fillRect(0,H-13,W,13);ctx.fillStyle='#ffffff18';ctx.fillRect(0,H-15,W,2);
+ ctx.fillStyle='#ffffff12';ctx.font='900 38px system-ui';ctx.fillText('DOSTAWA SPECJALNA',24,55)}
+function drawPlayer(){
+ ctx.save();ctx.translate(player.x,player.y);
+ ctx.shadowColor='#ff4f9a';ctx.shadowBlur=20;
+ ctx.fillStyle='#ff4f9a';rounded(-54,22,108,54,17);ctx.fill();
+ ctx.shadowBlur=0;ctx.fillStyle='#ffe8f2';rounded(-48,27,96,43,12);ctx.fill();
+ ctx.fillStyle='#191b32';ctx.font='900 14px system-ui';ctx.textAlign='center';ctx.fillText('TUSK DELIVERY',0,54);
+ ctx.beginPath();ctx.arc(0,-17,39,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();ctx.save();ctx.beginPath();ctx.arc(0,-17,35,0,Math.PI*2);ctx.clip();
+ if(tusk.complete&&tusk.naturalWidth){ctx.drawImage(tusk,-35,-52,70,70)}else{ctx.fillStyle='#d7b69d';ctx.fillRect(-35,-52,70,70);ctx.fillStyle='#222';ctx.font='bold 24px system-ui';ctx.fillText('DT',0,-8)}
+ ctx.restore();ctx.strokeStyle='#ff9cc5';ctx.lineWidth=4;ctx.beginPath();ctx.arc(0,-17,37,0,Math.PI*2);ctx.stroke();ctx.restore();
+}
+function drawItem(o){ctx.save();ctx.translate(o.x,o.y);ctx.rotate(o.rot);
+ if(o.gold){ctx.shadowColor='#ffd45a';ctx.shadowBlur=24}
+ ctx.fillStyle=o.gold?'#ffd45a':'#f7f8ff';rounded(-27,-16,54,32,9);ctx.fill();
+ ctx.fillStyle=o.gold?'#8b5b00':'#1769cf';rounded(-22,-12,44,24,6);ctx.fill();
+ ctx.fillStyle='#fff';ctx.font='1000 13px system-ui';ctx.textAlign='center';ctx.fillText(o.gold?'DUREX+':'DUREX',0,5);
+ ctx.fillStyle=o.gold?'#fff2b2':'#ff5d9f';ctx.fillRect(-18,10,36,3);ctx.restore()}
+function burst(x,y,color){for(let i=0;i<12;i++)particles.push({x,y,vx:(Math.random()-.5)*260,vy:(Math.random()-.7)*260,life:.65,color})}
+function update(dt,t){
+ if(!running||paused)return;
+ level=1+Math.floor(score/120);$('level').textContent=level;
+ let dir=(keys.ArrowLeft||keys.a?-1:0)+(keys.ArrowRight||keys.d?1:0);
+ player.x=Math.max(62,Math.min(W-62,player.x+dir*player.speed*dt));
+ spawn-=dt;if(spawn<=0){items.push({x:45+Math.random()*(W-90),y:-35,vy:175+level*24+Math.random()*70,rot:(Math.random()-.5)*.3,gold:Math.random()<.095});spawn=Math.max(.25,.82-level*.045)}
+ for(let i=items.length-1;i>=0;i--){let o=items[i];o.y+=o.vy*dt;o.rot+=dt*(o.gold?1.3:-.7);
+ if(Math.abs(o.x-player.x)<66&&o.y>player.y-48&&o.y<player.y+45){score+=o.gold?50:10;burst(o.x,o.y,o.gold?'#ffd45a':'#ff68aa');items.splice(i,1);updateHud();continue}
+ if(o.y>H+40){items.splice(i,1);if(!o.gold){lives--;shake=10;updateHud();if(lives<=0)endGame()}}
+ }
+ for(let i=particles.length-1;i>=0;i--){let p=particles[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=320*dt;p.life-=dt;if(p.life<=0)particles.splice(i,1)}
+ shake=Math.max(0,shake-dt*25);
+}
+function updateHud(){$('score').textContent=score;$('lives').textContent='❤️'.repeat(lives)+'🖤'.repeat(3-lives);if(score>best){best=score;localStorage.setItem('durexCatcherBest',best);$('best').textContent=best}}
+function render(t){ctx.save();if(shake)ctx.translate((Math.random()-.5)*shake,(Math.random()-.5)*shake);bg(t);items.forEach(drawItem);drawPlayer();particles.forEach(p=>{ctx.globalAlpha=Math.max(0,p.life/.65);ctx.fillStyle=p.color;ctx.fillRect(p.x,p.y,5,5)});ctx.globalAlpha=1;ctx.restore();
+ if(running&&paused){ctx.fillStyle='#090b18aa';ctx.fillRect(0,0,W,H);ctx.fillStyle='#fff';ctx.textAlign='center';ctx.font='1000 52px system-ui';ctx.fillText('PAUZA',W/2,H/2)}
+}
+function loop(t){let dt=Math.min((t-last)/1000||0,.035);last=t;update(dt,t);render(t);requestAnimationFrame(loop)}
+function start(){score=0;lives=3;level=1;items=[];particles=[];spawn=.5;player.x=W/2;running=true;paused=false;updateHud();$('overlay').classList.add('hidden')}
+function endGame(){running=false;let old=$('overlay');old.innerHTML='<div class="modal"><h1>KONIEC <em>DOSTAWY!</em></h1><p>Wynik: <b>'+score+'</b> pkt<br>Rekord: <b>'+best+'</b> pkt<br>Donald jest '+(score>=100?'dumny. No prawie.':'rozczarowany. Ale wierzy w Ciebie.')+'</p><button id="again">JESZCZE RAZ 🔁</button></div>';old.classList.remove('hidden');$('again').onclick=start}
+$('start').onclick=start;
+window.addEventListener('keydown',e=>{let k=e.key.toLowerCase();if(['arrowleft','arrowright',' '].includes(k))e.preventDefault();keys[e.key]=true;keys[k]=true;if(k===' '&&running)paused=!paused});
+window.addEventListener('keyup',e=>{keys[e.key]=false;keys[e.key.toLowerCase()]=false});
+function move(e){const r=canvas.getBoundingClientRect();player.x=Math.max(62,Math.min(W-62,(e.clientX-r.left)/r.width*W))}
+canvas.addEventListener('pointerdown',e=>{pointer=true;canvas.setPointerCapture(e.pointerId);move(e)});
+canvas.addEventListener('pointermove',e=>{if(pointer)move(e)});canvas.addEventListener('pointerup',()=>pointer=false);canvas.addEventListener('pointercancel',()=>pointer=false);
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&running)paused=true});
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
